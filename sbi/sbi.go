@@ -31,7 +31,7 @@ type P map[string]string
 
 var _ common.Account = &Account{}
 
-func Login(id, password string, params interface{}) (*Account, error) {
+func Login(id, password string) (*Account, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, err
@@ -40,7 +40,7 @@ func Login(id, password string, params interface{}) (*Account, error) {
 		client:    &http.Client{Jar: jar},
 		userAgent: "Mozilla/5.0 NetBankingtClient/0.1",
 	}
-	err = a.Login(id, password, params)
+	err = a.Login(id, password, nil)
 	return a, err
 }
 

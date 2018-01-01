@@ -45,7 +45,7 @@ type TempTransaction map[string]string
 
 var _ common.Account = &Account{}
 
-func Login(id, password string, params interface{}) (*Account, error) {
+func Login(id, password, numId string, grid []string) (*Account, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, err
@@ -54,15 +54,19 @@ func Login(id, password string, params interface{}) (*Account, error) {
 		client:    &http.Client{Jar: jar},
 		userAgent: "Mozilla/5.0 NetBankingtClient/0.1",
 	}
-	err = a.Login(id, password, params)
+
+	err = a.Login(id, password, map[string]interface{}{
+		"numId": numId,
+		"grid":  grid,
+	})
 	return a, err
 }
 
 func (a *Account) Login(id, password string, loginParams interface{}) error {
+	paramsMap := loginParams.(map[string]interface{})
+	numId := paramsMap["numId"].(string)
+	grid := paramsMap["grid"].([]string)
 
-	paramsMap, _ := loginParams.(map[string]string)
-
-	num := paramsMap["numId"]
 	params := P{
 		"MfcISAPICommand": "EntryFunc",
 		"fldAppID":        "RT",
@@ -72,7 +76,7 @@ func (a *Account) Login(id, password string, loginParams interface{}) error {
 		"fldDeviceID":     "01",
 		"fldLangID":       "JPN",
 		"fldUserID":       id,
-		"fldUserNumId":    num,
+		"fldUserNumId":    numId,
 		"fldUserPass":     password,
 		"fldRegAuthFlag":  "A",
 	}
@@ -83,7 +87,6 @@ func (a *Account) Login(id, password string, loginParams interface{}) error {
 
 	a.ssid = values["fldSessionID"]
 	log.Println(values)
-	grid := strings.Split(paramsMap["grid"], " ")
 
 	_, err = a.execute(P{
 		"MfcISAPICommand":   "EntryFunc",
