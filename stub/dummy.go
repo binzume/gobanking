@@ -1,0 +1,49 @@
+package stub
+
+import (
+	"time"
+
+	"../common"
+)
+
+type Account struct {
+}
+
+type TempTransaction map[string]interface{}
+
+var _ common.Account = &Account{}
+
+func Login(id, password string, params interface{}) (*Account, error) {
+	a := &Account{}
+	err := a.Login(id, password)
+	return a, err
+}
+
+func (a *Account) Login(id, password string) error {
+	return nil
+}
+
+func (a *Account) Logout() error {
+	return nil
+}
+
+func (a *Account) TotalBalance() (int64, error) {
+	return 0, nil
+}
+
+func (a *Account) Recent() ([]*common.Transaction, error) {
+	return nil, nil
+}
+
+func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
+	return nil, nil
+}
+
+// transfar api
+func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTransaction, error) {
+	return nil, nil
+}
+
+func (a *Account) Commit(tr TempTransaction, pass2 string) (string, error) {
+	return "dummy", nil
+}
