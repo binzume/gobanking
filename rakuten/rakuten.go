@@ -33,6 +33,7 @@ type TempTransaction map[string]interface{}
 
 var _ common.Account = &Account{}
 
+const BankCode = "0036"
 const baseurl = "https://fes.rakuten-bank.co.jp/"
 
 func Login(id, password string, params interface{}) (*Account, error) {

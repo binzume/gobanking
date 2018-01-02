@@ -37,11 +37,11 @@ type Account struct {
 	currentAccount *SubAccount
 }
 
+type TempTransaction map[string]string
 type P map[string]string
 
+const BankCode = "0397"
 const baseUrl = "https://pdirect04.shinseibank.com/FLEXCUBEAt/LiveConnect.dll"
-
-type TempTransaction map[string]string
 
 var _ common.Account = &Account{}
 

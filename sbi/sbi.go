@@ -24,6 +24,7 @@ type Account struct {
 	userAgent string
 }
 
+const BankCode = "0038"
 const baseUrl = "https://www.netbk.co.jp/wpl/NBGate/"
 
 type TempTransaction map[string]interface{}
