@@ -23,6 +23,7 @@ import (
 type Account struct {
 	client    *http.Client
 	userAgent string
+	sequence  int
 
 	balance   int64
 	userName  string
@@ -34,7 +35,7 @@ type TempTransaction map[string]interface{}
 var _ common.Account = &Account{}
 
 const BankCode = "0036"
-const baseurl = "https://fes.rakuten-bank.co.jp/"
+const baseurl = "https://fes.rakuten-bank.co.jp/MS/main/"
 
 func Login(id, password string, params interface{}) (*Account, error) {
 	jar, err := cookiejar.New(nil)
@@ -51,14 +52,14 @@ func Login(id, password string, params interface{}) (*Account, error) {
 
 func (a *Account) Login(id, password string, loginparams interface{}) error {
 	qa, _ := loginparams.(map[string]string)
-	_, err := a.get("MS/main/RbS?CurrentPageID=START&&COMMAND=LOGIN")
+	_, err := a.get("RbS?CurrentPageID=START&&COMMAND=LOGIN")
 	if err != nil {
 		return err
 	}
+	a.sequence = 1
 
 	params := map[string]string{
 		"LOGIN_SUBMIT":         "1",
-		"jsf_sequence":         "1",
 		"LOGIN:_link_hidden_":  "",
 		"LOGIN:_idJsp84":       "",
 		"LOGIN:USER_ID":        id,
@@ -85,7 +86,6 @@ func (a *Account) Login(id, password string, loginparams interface{}) error {
 
 		params := map[string]string{
 			"INPUT_FORM_SUBMIT":        "1",
-			"jsf_sequence":             "2",
 			"INPUT_FORM:_link_hidden_": "",
 			"INPUT_FORM:_idJsp157":     "INPUT_FORM:_idJsp157",
 			"INPUT_FORM:TOKEN":         a.getMached(res, `name="INPUT_FORM:TOKEN"\s+value="([^"]+)"`, ""),
@@ -98,11 +98,11 @@ func (a *Account) Login(id, password string, loginparams interface{}) error {
 		log.Println(res)
 	}
 
-	res, err = a.get("MS/main/gns?COMMAND=BALANCE_INQUIRY_START&&CurrentPageID=HEADER_FOOTER_LINK")
+	res, err = a.get("gns?COMMAND=BALANCE_INQUIRY_START&&CurrentPageID=HEADER_FOOTER_LINK")
 	if err != nil {
 		return err
 	}
-	log.Println(res)
+	// log.Println(res)
 
 	a.userName = a.getMached(res, `>\s+([^<]+?)\s+様\s+<`, "")
 	a.balance, _ = a.getMachedInt(res, `(?s)（支払可能残高）.*?>\s*([0-9,]+)\s*<`)
@@ -117,7 +117,7 @@ func (a *Account) Login(id, password string, loginparams interface{}) error {
 }
 
 func (a *Account) Logout() error {
-	_, err := a.get("MS/main/gns?COMMAND=LOGOUT_START&&CurrentPageID=HEADER_FOOTER_LINK")
+	_, err := a.get("gns?COMMAND=LOGOUT_START&&CurrentPageID=HEADER_FOOTER_LINK")
 	return err
 }
 
@@ -126,14 +126,14 @@ func (a *Account) TotalBalance() (int64, error) {
 }
 
 func (a *Account) Recent() ([]*common.Transaction, error) {
-	res, err := a.get("MS/main/gns?COMMAND=CREDIT_DEBIT_INQUIRY_START&CurrentPageID=HEADER_FOOTER_LINK")
+	res, err := a.get("gns?COMMAND=CREDIT_DEBIT_INQUIRY_START&CurrentPageID=HEADER_FOOTER_LINK")
 	re1 := regexp.MustCompile(`(?s)<tr class="td\d\dline">(.*?)<\/tr>`)
 	re2 := regexp.MustCompile(`(?s)<td[^>]*>\s*<[^>]+>\s*(.*?)<[^>]+>\s*<\/td>`)
 	re3 := regexp.MustCompile(`<[^>]+>`)
 
 	trs := []*common.Transaction{}
 	for _, match := range re1.FindAllStringSubmatch(res, -1) {
-		log.Println(match[1])
+		// log.Println(match[1])
 		cell := re2.FindAllStringSubmatch(match[1], -1)
 		if len(cell) > 3 {
 			var tr common.Transaction
@@ -151,7 +151,34 @@ func (a *Account) Recent() ([]*common.Transaction, error) {
 }
 
 func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
-	return a.Recent()
+	params := map[string]string{
+		"FORM_DOWNLOAD_SUBMIT":                   "1",
+		"FORM_DOWNLOAD:_link_hidden_":            "",
+		"FORM_DOWNLOAD:_idJsp481":                "",
+		"FORM_DOWNLOAD:EXPECTED_DATE_FROM_YEAR":  fmt.Sprintf("%04d", from.Year()),
+		"FORM_DOWNLOAD:EXPECTED_DATE_FROM_MONTH": fmt.Sprintf("%02d", from.Month()),
+		"FORM_DOWNLOAD:EXPECTED_DATE_FROM_DAY":   fmt.Sprintf("%02d", from.Day()),
+		"FORM_DOWNLOAD:EXPECTED_DATE_TO_YEAR":    fmt.Sprintf("%04d", to.Year()),
+		"FORM_DOWNLOAD:EXPECTED_DATE_TO_MONTH":   fmt.Sprintf("%02d", to.Month()),
+		"FORM_DOWNLOAD:EXPECTED_DATE_TO_DAY":     fmt.Sprintf("%02d", to.Day()),
+		"FORM_DOWNLOAD:DOWNLOAD_TYPE":            "0",
+	}
+	res, err := a.post("mainservice/Inquiry/CreditDebitInquiry/CreditDebitInquiry/CreditDebitInquiry", params)
+	trs := []*common.Transaction{}
+	for _, line := range strings.Split(res, "\n")[1:] {
+		var row = strings.Split(line, ",")
+		if len(row) >= 4 {
+			var tr common.Transaction
+			if t, err := time.Parse("20060102", row[0]); err == nil {
+				tr.Date = t
+			}
+			tr.Amount, _ = strconv.ParseInt(row[1], 10, 64)
+			// tr.Balance, _ = strconv.ParseInt(row[2], 10, 64)
+			tr.Description = row[3]
+			trs = append(trs, &tr)
+		}
+	}
+	return trs, err
 }
 
 // transfar api
@@ -169,6 +196,8 @@ func (a *Account) get(path string) (string, error) {
 		return "", err
 	}
 	req.Header.Set("User-Agent", a.userAgent)
+	log.Println("GET", path)
+	a.sequence += 2
 
 	res, err := a.client.Do(req)
 	defer res.Body.Close()
@@ -181,17 +210,21 @@ func (a *Account) get(path string) (string, error) {
 	if msg := a.getMached(doc, `class="errortxt">(.+?)</`, ""); msg != "" {
 		return doc, fmt.Errorf("ERROR: %s", html.UnescapeString(msg))
 	}
+	// log.Println(a.getMached(doc, `name="jsf_sequence" [^>]*value=["'](\d+)["']`, "not found"))
 	return doc, err
 }
 
 func (a *Account) post(cmd string, params map[string]string) (string, error) {
 	values := url.Values{}
+	params["jsf_sequence"] = fmt.Sprint(a.sequence)
+	a.sequence++
+
 	for k, v := range params {
 		values.Set(k, v)
 	}
-	log.Println("post ", cmd, values.Encode())
+	log.Println("POST", cmd, values.Encode())
 
-	req, err := http.NewRequest("POST", baseurl+"MS/main/fcs/rb/fes/jsp/"+cmd+".jsp", strings.NewReader(values.Encode()))
+	req, err := http.NewRequest("POST", baseurl+"fcs/rb/fes/jsp/"+cmd+".jsp", strings.NewReader(values.Encode()))
 	if err != nil {
 		return "", err
 	}

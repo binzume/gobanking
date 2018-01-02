@@ -13,8 +13,8 @@
 |----------|------|--------------|-------|------|
 | みずほ   | ok   | ok           | ok    | ok   |
 | 新生銀行 | ok   | ok           | ok    | ok   |
-| 楽天銀行 | ok   | ok           | TODO  | TODO |
-| SBI      | ok   | TODO         |       |      |
+| 楽天銀行 | ok   | ok           | ok    | TODO |
+| 住信SBI  | ok   | TODO         |       |      |
 
 ### memo
 
