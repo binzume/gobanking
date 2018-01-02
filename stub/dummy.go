@@ -13,13 +13,13 @@ type TempTransaction map[string]interface{}
 
 var _ common.Account = &Account{}
 
-func Login(id, password string, params interface{}) (*Account, error) {
+func Login(id, password string) (*Account, error) {
 	a := &Account{}
-	err := a.Login(id, password)
+	err := a.Login(id, password, nil)
 	return a, err
 }
 
-func (a *Account) Login(id, password string) error {
+func (a *Account) Login(id, password string, params interface{}) error {
 	return nil
 }
 

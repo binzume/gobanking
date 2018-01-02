@@ -22,11 +22,6 @@ import (
 
 // Mizuho Direct
 type Account struct {
-	id       string
-	password string
-	qa       map[string]string
-
-	// state
 	baseUrl string
 	client  *http.Client
 	form    map[string]string
@@ -41,16 +36,19 @@ type TempTransaction map[string]interface{}
 
 var _ common.Account = &Account{}
 
-var MizuhoUrl = "https://web1.ib.mizuhobank.co.jp/servlet/"
+const BankCode = "0001"
+const MizuhoUrl = "https://web1.ib.mizuhobank.co.jp/servlet/"
 
 func Login(id, password string, qa map[string]string) (*Account, error) {
-	a := &Account{
-		id:       id,
-		password: password,
-		qa:       qa,
-		baseUrl:  MizuhoUrl,
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
 	}
-	err := a.Login()
+	a := &Account{
+		baseUrl: MizuhoUrl,
+		client:  &http.Client{Jar: jar},
+	}
+	err = a.Login(id, password, qa)
 	return a, err
 }
 
@@ -166,35 +164,31 @@ func (a *Account) fetch(pageId string) (string, error) {
 	return a.parse(res)
 }
 
-func (a *Account) Login() error {
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return err
-	}
-	a.client = &http.Client{Jar: jar}
+func (a *Account) Login(id, password string, params interface{}) error {
+	qa := params.(map[string]string)
 
-	_, err = a.fetch("LOGBNK0000000B")
+	_, err := a.fetch("LOGBNK0000000B")
 	if err != nil {
 		return err
 	}
 	html, err := a.execute("LOGBNK0000001B", map[string]string{
 		"pm_fp":     "version%3D3%2E2%2E0%2E0%5F3%26pm%5Ffpua%3Dmozilla", // FingerPrint
-		"txbCustNo": a.id,
+		"txbCustNo": id,
 	}, true)
 	if err != nil {
 		return err
 	}
 
 	// aikotoba
-	html, err = a.sendAikotoba(html)
+	html, err = a.sendAikotoba(html, qa)
 	if err != nil {
 		return err
 	}
-	html, err = a.sendAikotoba(html)
+	html, err = a.sendAikotoba(html, qa)
 	if err != nil {
 		return err
 	}
-	html, err = a.sendPassword(html)
+	html, err = a.sendPassword(html, password)
 	if err != nil {
 		return err
 	}
@@ -339,11 +333,11 @@ func (a *Account) parseTopPage(doc string) error {
 	return nil
 }
 
-func (a *Account) sendAikotoba(html string) (string, error) {
+func (a *Account) sendAikotoba(html string, qa map[string]string) (string, error) {
 	re := regexp.MustCompile(`<span id="txtQuery">([^<]+)`)
 	if match := re.FindStringSubmatch(html); match != nil {
 		var ans string
-		for k, v := range a.qa {
+		for k, v := range qa {
 			if strings.Contains(match[1], k) {
 				ans = v
 			}
@@ -364,9 +358,9 @@ func (a *Account) sendAikotoba(html string) (string, error) {
 	return html, nil
 }
 
-func (a *Account) sendPassword(html string) (string, error) {
+func (a *Account) sendPassword(html, password string) (string, error) {
 	return a.execute("LOGBNK0000501B", map[string]string{
-		"PASSWD_LoginPwdInput": a.password,
+		"PASSWD_LoginPwdInput": password,
 	}, true)
 }
 
