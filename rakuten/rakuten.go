@@ -30,12 +30,19 @@ type Account struct {
 	lastLogin time.Time
 }
 
-type TempTransaction map[string]interface{}
+type TempTransaction map[string]string
 
 var _ common.Account = &Account{}
 
 const BankCode = "0036"
 const baseurl = "https://fes.rakuten-bank.co.jp/MS/main/"
+
+func toSJIS(s string) string {
+	buf := &bytes.Buffer{}
+	w := transform.NewWriter(buf, japanese.ShiftJIS.NewEncoder())
+	w.Write([]byte(s))
+	return buf.String()
+}
 
 func Login(id, password string, params interface{}) (*Account, error) {
 	jar, err := cookiejar.New(nil)
@@ -79,17 +86,12 @@ func (a *Account) Login(id, password string, loginparams interface{}) error {
 			}
 		}
 		log.Println("q:", qq, "->", ans)
-		buf := &bytes.Buffer{}
-		w := transform.NewWriter(buf, japanese.ShiftJIS.NewEncoder())
-		w.Write([]byte(ans))
-		ans = buf.String()
-
 		params := map[string]string{
 			"INPUT_FORM_SUBMIT":        "1",
 			"INPUT_FORM:_link_hidden_": "",
 			"INPUT_FORM:_idJsp157":     "INPUT_FORM:_idJsp157",
 			"INPUT_FORM:TOKEN":         a.getMached(res, `name="INPUT_FORM:TOKEN"\s+value="([^"]+)"`, ""),
-			"INPUT_FORM:SECRET_WORD":   ans,
+			"INPUT_FORM:SECRET_WORD":   toSJIS(ans),
 		}
 		res, err := a.post("commonservice/Security/LoginAuthentication/SecretWordAuthentication/SecretWordAuthentication", params)
 		if err != nil {
@@ -164,6 +166,7 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 		"FORM_DOWNLOAD:DOWNLOAD_TYPE":            "0",
 	}
 	res, err := a.post("mainservice/Inquiry/CreditDebitInquiry/CreditDebitInquiry/CreditDebitInquiry", params)
+	a.sequence-- // FIXME (no redirect response?)
 	trs := []*common.Transaction{}
 	for _, line := range strings.Split(res, "\n")[1:] {
 		var row = strings.Split(line, ",")
@@ -182,12 +185,69 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 }
 
 // transfar api
+// FIXME: targetName = registered index (0,1,2...)
 func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTransaction, error) {
-	return nil, nil
+	_, err := a.get("gns?COMMAND=TRANSFER_MENU_START&&CurrentPageID=HEADER_FOOTER_LINK")
+	if err != nil {
+		return nil, err
+	}
+
+	params := map[string]string{
+		"FORM_SUBMIT":        "1",
+		"FORM:_link_hidden_": "FORM:_idJsp430",
+	}
+	_, err = a.post("mainservice/Transfer/TransferMenu/TransferMenu/TransferMenu", params)
+	if err != nil {
+		return nil, err
+	}
+	n := targetName // TODO parse res.
+
+	params = map[string]string{
+		"SELECT_REGISTER_ACCOUNT_SUBMIT":                        "1",
+		"SELECT_REGISTER_ACCOUNT:_link_hidden_":                 "",
+		"SELECT_REGISTER_ACCOUNT:_idJsp431:" + n + ":_idJsp446": "SELECT_REGISTER_ACCOUNT:_idJsp431:" + n + ":_idJsp446",
+		"KANA_INDEX_KEY":                                        "",
+	}
+	res, err := a.post("mainservice/Transfer/TransferMenu/TransferSelect/TransferSelect", params)
+	if err != nil {
+		return nil, err
+	}
+	// log.Println(res)
+
+	params = map[string]string{
+		"FORM_SUBMIT":                "1",
+		"FORM:_link_hidden_":         "",
+		"FORM:_idJsp230":             "FORM:_idJsp230",
+		"FORM:COMMENT":               "",
+		"FORM:DEBIT_OWNER_NAME_KANA": toSJIS(a.getMached(res, `name="FORM:DEBIT_OWNER_NAME_KANA" [^>]*value="([^"]+)"`, "")),
+		"FORM:AMOUNT":                fmt.Sprint(amount),
+	}
+	res, err = a.post("mainservice/Transfer/Basic/Basic/BasicRegisteredInput", params)
+	if err != nil {
+		return nil, err
+	}
+	log.Println(res)
+
+	token := a.getMached(res, `name="SECURITY_BOARD:TOKEN" [^>]*value="([^"]*)"`, "")
+	fee := a.getMached(res, `(?s)振込手数料</div>\s*</th>\s*<td[^>]*>\s*(.*?)</td>`, "")
+	date := a.getMached(res, `(?s)振込予定日</div>\s*</th>\s*<td[^>]*>\s*(.*?)</td>`, "")
+	to := a.getMached(res, `(?s)振込先</div>\s*</th>\s*<td[^>]*>\s*(.*?)</td>`, "")
+	if token == "" {
+		err = fmt.Errorf("get token error")
+	}
+	return TempTransaction{"token": token, "fee": fee, "date": date, "to": to}, err
 }
 
 func (a *Account) Commit(tr TempTransaction, pass2 string) (string, error) {
-	return "dummy", nil
+	params := map[string]string{
+		"SECURITY_BOARD_SUBMIT:1":      "1",
+		"SECURITY_BOARD:_link_hidden_": "",
+		"SECURITY_BOARD:_idJsp905":     "SECURITY_BOARD:_idJsp905",
+		"SECURITY_BOARD:USER_PASSWORD": pass2, // TODO
+		"SECURITY_BOARD:TOKEN":         tr["token"],
+	}
+	res, err := a.post("mainservice/Transfer/Basic/Basic/BasicConfirm", params)
+	return res, err
 }
 
 func (a *Account) get(path string) (string, error) {
@@ -195,50 +255,44 @@ func (a *Account) get(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", a.userAgent)
+
 	log.Println("GET", path)
 	a.sequence += 2
-
-	res, err := a.client.Do(req)
-	defer res.Body.Close()
-
-	b, err := ioutil.ReadAll(transform.NewReader(res.Body, japanese.ShiftJIS.NewDecoder()))
-	if err != nil {
-		return "", err
-	}
-	doc := string(b)
-	if msg := a.getMached(doc, `class="errortxt">(.+?)</`, ""); msg != "" {
-		return doc, fmt.Errorf("ERROR: %s", html.UnescapeString(msg))
-	}
-	// log.Println(a.getMached(doc, `name="jsf_sequence" [^>]*value=["'](\d+)["']`, "not found"))
-	return doc, err
+	return a.request(req)
 }
 
 func (a *Account) post(cmd string, params map[string]string) (string, error) {
 	values := url.Values{}
-	params["jsf_sequence"] = fmt.Sprint(a.sequence)
-	a.sequence++
-
+	values.Set("jsf_sequence", fmt.Sprint(a.sequence))
 	for k, v := range params {
 		values.Set(k, v)
 	}
-	log.Println("POST", cmd, values.Encode())
 
 	req, err := http.NewRequest("POST", baseurl+"fcs/rb/fes/jsp/"+cmd+".jsp", strings.NewReader(values.Encode()))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", a.userAgent)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	res, err := a.client.Do(req)
-	defer res.Body.Close()
+	log.Println("POST", cmd, values.Encode())
+	a.sequence++
+	return a.request(req)
+}
 
+func (a *Account) request(req *http.Request) (string, error) {
+	req.Header.Set("User-Agent", a.userAgent)
+	res, err := a.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+
+	defer res.Body.Close()
 	b, err := ioutil.ReadAll(transform.NewReader(res.Body, japanese.ShiftJIS.NewDecoder()))
 	if err != nil {
 		return "", err
 	}
 	doc := string(b)
+	// log.Println(a.getMached(doc, `name="jsf_sequence" [^>]*value=["'](\d+)["']`, "not found"))
 	if msg := a.getMached(doc, `class="errortxt">(.+?)</`, ""); msg != "" {
 		return doc, fmt.Errorf("ERROR: %s", html.UnescapeString(msg))
 	}
