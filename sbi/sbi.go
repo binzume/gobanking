@@ -1,13 +1,11 @@
 package sbi
 
 import (
-	"html"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,12 +17,15 @@ import (
 )
 
 type Account struct {
+	common.BankAccount
 	balance   int64
 	client    *http.Client
 	userAgent string
+	lastLogin time.Time
 }
 
 const BankCode = "0038"
+const BankName = "住信SBIネット銀行"
 const baseUrl = "https://www.netbk.co.jp/wpl/NBGate/"
 
 type TempTransaction map[string]interface{}
@@ -58,8 +59,14 @@ func (a *Account) Login(id, password string, loginParams interface{}) error {
 
 	// top
 	res, err := a.get("i020101CT/DI02010100")
-	// log.Println(res)
-	a.balance, _ = a.getMachedInt(res, `(?s)<strong>お預入れ合計<\/strong>.*?<strong>([\d,]+)\s*円<\/strong>`)
+	a.balance, _ = getMatchedInt(res, `(?s)<strong>お預入れ合計<\/strong>.*?<strong>([\d,]+)\s*円<\/strong>`)
+
+	// account infos
+	// res, err := a.get("i020401CT")
+
+	a.BankCode = BankCode
+	a.BankName = BankName
+
 	return err
 }
 
@@ -72,11 +79,29 @@ func (a *Account) TotalBalance() (int64, error) {
 	return a.balance, nil
 }
 
+func (a *Account) LastLogin() (time.Time, error) {
+	return a.lastLogin, nil
+}
+
 func (a *Account) Recent() ([]*common.Transaction, error) {
 	return nil, nil
 }
 
 func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
+	// TODO
+	/*
+		res, err := a.get("i020201CT/PD/01/01/001/01")
+		// <form method="post" action="/wpl/NBGate" name="form0202_01_100">
+		res, err := a.post("", P{
+			"term":"01",
+			"dsplyTrmSpcfdYearFrom":fmt.Sprintf("%04d", from.Year()),
+			"dsplyTrmSpcfdMonthFrom":fmt.Sprintf("%02d", from.Month()),
+			"dsplyTrmSpcfdDayFrom":fmt.Sprintf("%02d", from.Day()),
+			"dsplyTrmSpcfdYearTo":fmt.Sprintf("%04d", to.Year()),
+			"dsplyTrmSpcfdMonthTo":fmt.Sprintf("%02d", to.Month()),
+			"dsplyTrmSpcfdDayTo":fmt.Sprintf("%02d", to.Day()),
+			}
+	*/
 	return nil, nil
 }
 
@@ -135,15 +160,10 @@ func (a *Account) get(path string) (string, error) {
 	return string(b), err
 }
 
-func (a *Account) getMachedInt(s, reStr string) (int64, error) {
-	return strconv.ParseInt(strings.Replace(a.getMached(s, reStr, ""), ",", "", -1), 10, 64)
+func getMatchedInt(htmlStr, reStr string) (int64, error) {
+	return strconv.ParseInt(strings.Replace(getMatched(htmlStr, reStr, ""), ",", "", -1), 10, 64)
 }
 
-func (a *Account) getMached(s, reStr, def string) string {
-	re := regexp.MustCompile(reStr)
-	if m := re.FindStringSubmatch(s); m != nil {
-		re := regexp.MustCompile(`<[^>]+>`)
-		return strings.TrimSpace(html.UnescapeString(re.ReplaceAllString(m[1], "")))
-	}
-	return def
+func getMatched(htmlStr, reStr, def string) string {
+	return common.GetMatched(htmlStr, reStr, def)
 }

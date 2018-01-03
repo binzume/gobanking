@@ -1,9 +1,7 @@
 package rakuten
 
 import (
-	"bytes"
 	"fmt"
-	"html"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -21,6 +19,8 @@ import (
 )
 
 type Account struct {
+	common.BankAccount
+
 	client    *http.Client
 	userAgent string
 	sequence  int
@@ -35,14 +35,8 @@ type TempTransaction map[string]string
 var _ common.Account = &Account{}
 
 const BankCode = "0036"
+const BankName = "楽天銀行"
 const baseurl = "https://fes.rakuten-bank.co.jp/MS/main/"
-
-func toSJIS(s string) string {
-	buf := &bytes.Buffer{}
-	w := transform.NewWriter(buf, japanese.ShiftJIS.NewEncoder())
-	w.Write([]byte(s))
-	return buf.String()
-}
 
 func Login(id, password string, params interface{}) (*Account, error) {
 	jar, err := cookiejar.New(nil)
@@ -78,42 +72,44 @@ func (a *Account) Login(id, password string, loginparams interface{}) error {
 	}
 
 	if strings.Contains(res, "INPUT_FORM:SECRET_WORD") {
-		qq := a.getMached(res, `(?s)質問<.*?>\s*([^\s<]+)\s*<`, "")
+		qq := getMatched(res, `(?s)質問<.*?>\s*([^\s<]+)\s*<`, "")
 		ans := ""
 		for k, v := range qa {
 			if strings.Contains(qq, k) {
 				ans = v
 			}
 		}
-		log.Println("q:", qq, "->", ans)
+		log.Println("q:", qq, ans != "")
 		params := map[string]string{
 			"INPUT_FORM_SUBMIT":        "1",
 			"INPUT_FORM:_link_hidden_": "",
 			"INPUT_FORM:_idJsp157":     "INPUT_FORM:_idJsp157",
-			"INPUT_FORM:TOKEN":         a.getMached(res, `name="INPUT_FORM:TOKEN"\s+value="([^"]+)"`, ""),
-			"INPUT_FORM:SECRET_WORD":   toSJIS(ans),
+			"INPUT_FORM:TOKEN":         getMatched(res, `name="INPUT_FORM:TOKEN"\s+value="([^"]+)"`, ""),
+			"INPUT_FORM:SECRET_WORD":   common.ToSJIS(ans),
 		}
-		res, err := a.post("commonservice/Security/LoginAuthentication/SecretWordAuthentication/SecretWordAuthentication", params)
+		_, err := a.post("commonservice/Security/LoginAuthentication/SecretWordAuthentication/SecretWordAuthentication", params)
 		if err != nil {
 			return err
 		}
-		log.Println(res)
 	}
 
 	res, err = a.get("gns?COMMAND=BALANCE_INQUIRY_START&&CurrentPageID=HEADER_FOOTER_LINK")
 	if err != nil {
 		return err
 	}
-	// log.Println(res)
 
-	a.userName = a.getMached(res, `>\s+([^<]+?)\s+様\s+<`, "")
-	a.balance, _ = a.getMachedInt(res, `(?s)（支払可能残高）.*?>\s*([0-9,]+)\s*<`)
-	lastLoginStr := a.getMached(res, `>\s+前回ログイン日時\s+([^<]+?)\s+<`, "")
+	a.balance, _ = getMatchedInt(res, `(?s)（支払可能残高）.*?>\s*([0-9,]+)\s*<`)
+	lastLoginStr := getMatched(res, `>\s+前回ログイン日時\s+([^<]+?)\s+<`, "")
 	if t, err := time.Parse("2006/01/02 15:04:05", lastLoginStr); err == nil {
 		a.lastLogin = t
 	}
-	// :branch => get_match(res.body, />\s+支店番号\s+([^<]+?)\s+</),
-	// :acc_num => get_match(res.body, />\s+口座番号\s+([^<]+?)\s+</),
+
+	a.BankCode = BankCode
+	a.BankName = BankName
+	a.OwnerName = getMatched(res, `>\s+([^<]+?)\s+様\s*<`, "")
+	a.BranchCode = getMatched(res, `>\s+支店番号\s+([^<]+?)\s*<`, "")
+	a.AccountNum = getMatched(res, `>\s+口座番号\s+([^<]+?)\s*<`, "")
+	a.BranchName = getMatched(res, `(?s)>\s+([^<]+支店)\s*</FONT>\s*</TD>\s*<TD>\s*<IMG[^>]*>`, "")
 
 	return err
 }
@@ -125,6 +121,10 @@ func (a *Account) Logout() error {
 
 func (a *Account) TotalBalance() (int64, error) {
 	return a.balance, nil
+}
+
+func (a *Account) LastLogin() (time.Time, error) {
+	return a.lastLogin, nil
 }
 
 func (a *Account) Recent() ([]*common.Transaction, error) {
@@ -184,9 +184,7 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 	return trs, err
 }
 
-// transfar api
-// FIXME: targetName = registered index (0,1,2...)
-func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTransaction, error) {
+func (a *Account) GetRegistered() (map[string]string, error) {
 	_, err := a.get("gns?COMMAND=TRANSFER_MENU_START&&CurrentPageID=HEADER_FOOTER_LINK")
 	if err != nil {
 		return nil, err
@@ -200,9 +198,20 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTra
 	if err != nil {
 		return nil, err
 	}
-	n := targetName // TODO parse res.
+	// TODO
+	return nil, nil
+}
 
-	params = map[string]string{
+// transfar api
+// FIXME: targetName = registered index (0,1,2...)
+func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTransaction, error) {
+	_, err := a.GetRegistered()
+	if err != nil {
+		return nil, err
+	}
+	n := targetName // TODO
+
+	params := map[string]string{
 		"SELECT_REGISTER_ACCOUNT_SUBMIT":                        "1",
 		"SELECT_REGISTER_ACCOUNT:_link_hidden_":                 "",
 		"SELECT_REGISTER_ACCOUNT:_idJsp431:" + n + ":_idJsp446": "SELECT_REGISTER_ACCOUNT:_idJsp431:" + n + ":_idJsp446",
@@ -219,7 +228,7 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTra
 		"FORM:_link_hidden_":         "",
 		"FORM:_idJsp230":             "FORM:_idJsp230",
 		"FORM:COMMENT":               "",
-		"FORM:DEBIT_OWNER_NAME_KANA": toSJIS(a.getMached(res, `name="FORM:DEBIT_OWNER_NAME_KANA" [^>]*value="([^"]+)"`, "")),
+		"FORM:DEBIT_OWNER_NAME_KANA": common.ToSJIS(getMatched(res, `name="FORM:DEBIT_OWNER_NAME_KANA" [^>]*value="([^"]+)"`, "")),
 		"FORM:AMOUNT":                fmt.Sprint(amount),
 	}
 	res, err = a.post("mainservice/Transfer/Basic/Basic/BasicRegisteredInput", params)
@@ -228,10 +237,10 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTra
 	}
 	log.Println(res)
 
-	token := a.getMached(res, `name="SECURITY_BOARD:TOKEN" [^>]*value="([^"]*)"`, "")
-	fee := a.getMached(res, `(?s)振込手数料</div>\s*</th>\s*<td[^>]*>\s*(.*?)</td>`, "")
-	date := a.getMached(res, `(?s)振込予定日</div>\s*</th>\s*<td[^>]*>\s*(.*?)</td>`, "")
-	to := a.getMached(res, `(?s)振込先</div>\s*</th>\s*<td[^>]*>\s*(.*?)</td>`, "")
+	token := getMatched(res, `name="SECURITY_BOARD:TOKEN" [^>]*value="([^"]*)"`, "")
+	fee := getMatched(res, `(?s)振込手数料</div>\s*</th>\s*<td[^>]*>\s*(.*?)</td>`, "")
+	date := getMatched(res, `(?s)振込予定日</div>\s*</th>\s*<td[^>]*>\s*(.*?)</td>`, "")
+	to := getMatched(res, `(?s)振込先</div>\s*</th>\s*<td[^>]*>\s*(.*?)</td>`, "")
 	if token == "" {
 		err = fmt.Errorf("get token error")
 	}
@@ -292,22 +301,17 @@ func (a *Account) request(req *http.Request) (string, error) {
 		return "", err
 	}
 	doc := string(b)
-	// log.Println(a.getMached(doc, `name="jsf_sequence" [^>]*value=["'](\d+)["']`, "not found"))
-	if msg := a.getMached(doc, `class="errortxt">(.+?)</`, ""); msg != "" {
-		return doc, fmt.Errorf("ERROR: %s", html.UnescapeString(msg))
+	// log.Println(getMatched(doc, `name="jsf_sequence" [^>]*value=["'](\d+)["']`, "not found"))
+	if msg := getMatched(doc, `class="errortxt">(.+?)</`, ""); msg != "" {
+		return doc, fmt.Errorf("ERROR: %s", msg)
 	}
 	return doc, err
 }
 
-func (a *Account) getMachedInt(s, reStr string) (int64, error) {
-	return strconv.ParseInt(strings.Replace(a.getMached(s, reStr, ""), ",", "", -1), 10, 64)
+func getMatchedInt(htmlStr, reStr string) (int64, error) {
+	return strconv.ParseInt(strings.Replace(getMatched(htmlStr, reStr, ""), ",", "", -1), 10, 64)
 }
 
-func (a *Account) getMached(s, reStr, def string) string {
-	re := regexp.MustCompile(reStr)
-	if m := re.FindStringSubmatch(s); m != nil {
-		re := regexp.MustCompile(`<[^>]+>`)
-		return strings.TrimSpace(html.UnescapeString(re.ReplaceAllString(m[1], "")))
-	}
-	return def
+func getMatched(htmlStr, reStr, def string) string {
+	return common.GetMatched(htmlStr, reStr, def)
 }

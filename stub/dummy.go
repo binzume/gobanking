@@ -11,6 +11,8 @@ type Account struct {
 
 type TempTransaction map[string]interface{}
 
+const BankCode = "9999"
+
 var _ common.Account = &Account{}
 
 func Login(id, password string) (*Account, error) {
@@ -29,6 +31,10 @@ func (a *Account) Logout() error {
 
 func (a *Account) TotalBalance() (int64, error) {
 	return 0, nil
+}
+
+func (a *Account) LastLogin() (time.Time, error) {
+	return time.Now(), nil
 }
 
 func (a *Account) Recent() ([]*common.Transaction, error) {

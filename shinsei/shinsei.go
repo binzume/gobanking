@@ -30,7 +30,6 @@ type Account struct {
 	userAgent string
 
 	balance        int64
-	userName       string
 	lastLogin      time.Time
 	ssid           string
 	accounts       map[string]*SubAccount
@@ -120,6 +119,10 @@ func (a *Account) Logout() error {
 
 func (a *Account) TotalBalance() (int64, error) {
 	return a.balance, nil
+}
+
+func (a *Account) LastLogin() (time.Time, error) {
+	return a.lastLogin, nil
 }
 
 func (a *Account) Recent() ([]*common.Transaction, error) {
@@ -260,7 +263,6 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int64) (TempT
 	if err != nil {
 		return nil, err
 	}
-	log.Println(values)
 	// fee := fldTransferFee - fldReimbursedAmt
 
 	return values, nil

@@ -1,7 +1,6 @@
 package mizuho
 
 import (
-	"bytes"
 	"fmt"
 	"html"
 	"io/ioutil"
@@ -22,22 +21,24 @@ import (
 
 // Mizuho Direct
 type Account struct {
+	common.BankAccount
+
 	baseUrl string
 	client  *http.Client
 	form    map[string]string
 
-	recent       []*common.Transaction
-	balance      int64
-	lastLogin    time.Time
-	userName     string
-	lastResponse string
+	recent    []*common.Transaction
+	balance   int64
+	lastLogin time.Time
 }
 type TempTransaction map[string]interface{}
 
 var _ common.Account = &Account{}
 
 const BankCode = "0001"
+const BankName = "みずほ銀行"
 const MizuhoUrl = "https://web1.ib.mizuhobank.co.jp/servlet/"
+const DummyFingerPrint = "version%3D3%2E2%2E0%2E0%5F3%26pm%5Ffpua%3Dmozilla"
 
 func Login(id, password string, qa map[string]string) (*Account, error) {
 	jar, err := cookiejar.New(nil)
@@ -57,122 +58,13 @@ func (a *Account) Logout() error {
 	return err
 }
 
-func (a *Account) execute(pageId string, params map[string]string, check bool) (string, error) {
-	log.Println("execute ", pageId, params)
-
-	values := url.Values{}
-	for k, v := range a.form {
-		values.Set(k, v)
-	}
-	for k, v := range params {
-		values.Set(k, v)
-	}
-
-	req, err := http.NewRequest("POST", a.baseUrl+pageId+".do", strings.NewReader(values.Encode()))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 MizuhoDirectClient/0.1")
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	res, err := a.client.Do(req)
-	if res.Request.Method != "GET" {
-		defer res.Body.Close()
-
-		b, err := ioutil.ReadAll(transform.NewReader(res.Body, japanese.ShiftJIS.NewDecoder()))
-		if err != nil {
-			return "", err
-		}
-
-		re := regexp.MustCompile(`<div\s[^>]*id="ErrorMessage"[^>]*>(.+?)</"`)
-		var msg string
-		if match := re.FindStringSubmatch(string(b)); match != nil {
-			msg = match[1]
-		}
-		a.lastResponse = string(b)
-		return "", fmt.Errorf("execute error" + msg)
-	}
-
-	return a.parse(res)
-}
-
-func (a *Account) getFormValue(html, name string) string {
-	re := regexp.MustCompile(`<input\s[^>]*?name="` + name + `"[^>]*?value="([^"]*)"`)
-	match := re.FindStringSubmatch(html)
-	if match != nil {
-		return match[1]
-	}
-	return ""
-}
-
-func (a *Account) parse(res *http.Response) (string, error) {
-	defer res.Body.Close()
-
-	b, err := ioutil.ReadAll(transform.NewReader(res.Body, japanese.ShiftJIS.NewDecoder()))
-	if err != nil {
-		return "", err
-	}
-	html := string(b)
-	a.lastResponse = html
-
-	basere := regexp.MustCompile(`<base href="(https://[^"]+)">`)
-	base := basere.FindStringSubmatch(html)
-	if base != nil {
-		a.baseUrl = base[1]
-	}
-
-	form := map[string]string{
-		"_FRAMEID":  a.getFormValue(html, "_FRAMEID"),
-		"_TARGETID": a.getFormValue(html, "_TARGETID"),
-		"_LUID":     a.getFormValue(html, "_LUID"),     // ?
-		"_SUBINDEX": a.getFormValue(html, "_SUBINDEX"), // ?
-		"_TOKEN":    a.getFormValue(html, "_TOKEN"),
-		"_FORMID":   a.getFormValue(html, "_FORMID"),
-		"POSTKEY":   a.getFormValue(html, "POSTKEY"),
-	}
-	if len(form) == 0 {
-		re := regexp.MustCompile(`<div\s[^>]*id="ErrorMessage"[^>]*>(.+?)</"`)
-		var msg string
-		if match := re.FindStringSubmatch(html); match != nil {
-			msg = match[1]
-		}
-		return html, fmt.Errorf("execute error" + msg)
-	}
-	a.form = form
-	return html, nil
-}
-
-func (a *Account) fetch(pageId string) (string, error) {
-	log.Println("fetch ", pageId)
-	values := url.Values{}
-	for k, v := range a.form {
-		values.Set(k, v)
-	}
-	url := a.baseUrl + pageId + ".do?" + values.Encode()
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return "", err
-	}
-
-	req.Header.Set("User-Agent", "Mozilla/5.0 MizuhoDirectClient/0.1")
-
-	res, err := a.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-
-	return a.parse(res)
-}
-
 func (a *Account) Login(id, password string, params interface{}) error {
-	qa := params.(map[string]string)
-
 	_, err := a.fetch("LOGBNK0000000B")
 	if err != nil {
 		return err
 	}
 	html, err := a.execute("LOGBNK0000001B", map[string]string{
-		"pm_fp":     "version%3D3%2E2%2E0%2E0%5F3%26pm%5Ffpua%3Dmozilla", // FingerPrint
+		"pm_fp":     DummyFingerPrint,
 		"txbCustNo": id,
 	}, true)
 	if err != nil {
@@ -180,24 +72,31 @@ func (a *Account) Login(id, password string, params interface{}) error {
 	}
 
 	// aikotoba
+	qa := params.(map[string]string)
 	html, err = a.sendAikotoba(html, qa)
 	if err != nil {
 		return err
 	}
 	html, err = a.sendAikotoba(html, qa)
-	if err != nil {
-		return err
-	}
-	html, err = a.sendPassword(html, password)
 	if err != nil {
 		return err
 	}
 
+	html, err = a.execute("LOGBNK0000501B", map[string]string{
+		"PASSWD_LoginPwdInput": password,
+	}, true)
+	if err != nil {
+		return err
+	}
 	return a.parseTopPage(html)
 }
 
 func (a *Account) TotalBalance() (int64, error) {
 	return a.balance, nil
+}
+
+func (a *Account) LastLogin() (time.Time, error) {
+	return a.lastLogin, nil
 }
 
 func (a *Account) ReloadTopPage() error {
@@ -254,6 +153,7 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTra
 	if err != nil {
 		return nil, err
 	}
+	// log.Println(res)
 
 	pp := []int{0, 0, 0, 0}
 	re := regexp.MustCompile(`<span id="txtScndPwdDgt(\d+)">(\d+)<`)
@@ -270,24 +170,10 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTra
 		"next":         "TRNTRN0508001B",
 	}
 
-	re = regexp.MustCompile(`<span\s+id="txtTrnfrFee"[^>]*>([\d,]+)`)
-	if m := re.FindStringSubmatch(res); m != nil {
-		tr["fee"] = m[1]
-	}
-	re = regexp.MustCompile(`<span\s+id="txtTrnfrAmnt"[^>]*>([\d,]+)`)
-	if m := re.FindStringSubmatch(res); m != nil {
-		tr["amount"] = m[1]
-	}
-	re = regexp.MustCompile(`<span\s+id="txtTrnfrAppDate"[^>]*>([^<]+)<`)
-	if m := re.FindStringSubmatch(res); m != nil {
-		tr["date"] = m[1]
-	}
-	re = regexp.MustCompile(`<span\s+id="txtPayeeNm"[^>]*>([^<]+)<`)
-	if m := re.FindStringSubmatch(res); m != nil {
-		tr["payee"] = m[1]
-	}
-
-	log.Println(res)
+	tr["fee"] = getMatched(res, `<span\s+id="txtTrnfrFee"[^>]*>([\d,]+)`, "")
+	tr["amount"] = getMatched(res, `<span\s+id="txtTrnfrAmnt"[^>]*>([\d,]+)`, "")
+	tr["date"] = getMatched(res, `<span\s+id="txtTrnfrAppDate"[^>]*>([^<]+)<`, "")
+	tr["payee"] = getMatched(res, `<span\s+id="txtPayeeNm"[^>]*>([^<]+)<`, "")
 
 	return tr, nil
 }
@@ -302,31 +188,27 @@ func (a *Account) Commit(tr TempTransaction, pass2 string) (string, error) {
 		"chkTrnfrCntntConf": "on",
 	}, true)
 
-	re := regexp.MustCompile(`<span\s+id="txtRecptNo"[^>]*>([^<]+)`)
-	if m := re.FindStringSubmatch(res); m != nil {
-		return m[1], err
-	}
-
-	return "", err
+	return getMatched(res, `<span\s+id="txtRecptNo"[^>]*>([^<]+)`, ""), err
 }
 
 func (a *Account) parseTopPage(doc string) error {
 	a.recent = a.parseHistory(doc)
-	re := regexp.MustCompile(`<span\s+id="txtCrntBal"[^>]*>([\d,]+)`)
-	if m := re.FindStringSubmatch(doc); m != nil {
-		a.balance, _ = strconv.ParseInt(strings.Replace(m[1], ",", "", -1), 10, 64)
+
+	if m := getMatched(doc, `<span\s+id="txtCrntBal"[^>]*>([\d,]+)`, ""); m != "" {
+		a.balance, _ = strconv.ParseInt(strings.Replace(m, ",", "", -1), 10, 64)
 	}
 
-	re = regexp.MustCompile(`<span\s+id="txtLoginInfoCustNm"[^>]*>([^<]+)`)
-	if m := re.FindStringSubmatch(doc); m != nil {
-		a.userName = html.UnescapeString(m[1])
-	}
+	a.BankCode = BankCode
+	a.BankName = BankName
+	a.OwnerName = getMatched(doc, `<span\s+id="txtLoginInfoCustNm"[^>]*>([^<]+)`, "")
+	a.BranchCode = getMatched(doc, `<meta property="page.branchcd" content="(\d+)">`, "")
+	a.BranchName = getMatched(doc, `<span\s+id="txtBrnch"[^>]*>([^<]+)`, "")
+	a.AccountNum = getMatched(doc, `<span\s+id="txtAccNo"[^>]*>([^<]+)`, "")
 
-	re = regexp.MustCompile(`<span\s+id="txtLastUsgTm"[^>]*>([^<]+)`)
-	if m := re.FindStringSubmatch(doc); m != nil {
-		m[1] = strings.Replace(m[1], "&nbsp;", " ", -1)
+	if m := getMatched(doc, `<span\s+id="txtLastUsgTm"[^>]*>([^<]+)`, ""); m != "" {
+		m = strings.Replace(m, "\uC2A0", " ", -1)
 		var timeformat = "2006.01.02 15:04"
-		if t, err := time.Parse(timeformat, html.UnescapeString(m[1])); err == nil {
+		if t, err := time.Parse(timeformat, m); err == nil {
 			a.lastLogin = t
 		}
 	}
@@ -334,34 +216,23 @@ func (a *Account) parseTopPage(doc string) error {
 }
 
 func (a *Account) sendAikotoba(html string, qa map[string]string) (string, error) {
-	re := regexp.MustCompile(`<span id="txtQuery">([^<]+)`)
-	if match := re.FindStringSubmatch(html); match != nil {
+	if q := getMatched(html, `<span id="txtQuery">([^<]+)`, ""); q != "" {
 		var ans string
 		for k, v := range qa {
-			if strings.Contains(match[1], k) {
+			if strings.Contains(q, k) {
 				ans = v
 			}
 		}
-		log.Println(match[1], "->", ans)
+		log.Println(q, ans != "")
 		if ans == "" {
 			return "", nil
 		}
-		buf := &bytes.Buffer{}
-		w := transform.NewWriter(buf, japanese.ShiftJIS.NewEncoder())
-		w.Write([]byte(ans))
-		ans = buf.String()
 		return a.execute("LOGWRD0010001B", map[string]string{
 			"chkConfItemChk": "on",
-			"txbTestWord":    ans,
+			"txbTestWord":    common.ToSJIS(ans),
 		}, true)
 	}
 	return html, nil
-}
-
-func (a *Account) sendPassword(html, password string) (string, error) {
-	return a.execute("LOGBNK0000501B", map[string]string{
-		"PASSWD_LoginPwdInput": password,
-	}, true)
 }
 
 func (a *Account) parseHistory(doc string) []*common.Transaction {
@@ -420,4 +291,78 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 	}, true)
 
 	return a.parseHistory(res), err
+}
+
+func (a *Account) execute(pageId string, params map[string]string, check bool) (string, error) {
+	log.Println("execute ", pageId, params)
+
+	values := url.Values{}
+	for k, v := range a.form {
+		values.Set(k, v)
+	}
+	for k, v := range params {
+		values.Set(k, v)
+	}
+
+	req, err := http.NewRequest("POST", a.baseUrl+pageId+".do", strings.NewReader(values.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	return a.request(req)
+}
+
+func (a *Account) fetch(pageId string) (string, error) {
+	log.Println("fetch ", pageId)
+	values := url.Values{}
+	for k, v := range a.form {
+		values.Set(k, v)
+	}
+	url := a.baseUrl + pageId + ".do?" + values.Encode()
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	return a.request(req)
+}
+
+func (a *Account) request(req *http.Request) (string, error) {
+	req.Header.Set("User-Agent", "Mozilla/5.0 MizuhoDirectClient/0.1")
+	res, err := a.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+
+	b, err := ioutil.ReadAll(transform.NewReader(res.Body, japanese.ShiftJIS.NewDecoder()))
+	if err != nil {
+		return "", err
+	}
+	html := string(b)
+	a.baseUrl = getMatched(html, `<base href="(https://[^"]+)">`, a.baseUrl)
+
+	form := map[string]string{
+		"_FRAMEID":  getFormValue(html, "_FRAMEID"),
+		"_TARGETID": getFormValue(html, "_TARGETID"),
+		"_LUID":     getFormValue(html, "_LUID"),     // ?
+		"_SUBINDEX": getFormValue(html, "_SUBINDEX"), // ?
+		"_TOKEN":    getFormValue(html, "_TOKEN"),
+		"_FORMID":   getFormValue(html, "_FORMID"),
+		"POSTKEY":   getFormValue(html, "POSTKEY"),
+	}
+	if form["POSTKEY"] == "" {
+		msg := getMatched(html, `<div\s[^>]*id="ErrorMessage"[^>]*>(.+?)</"`, "")
+		return html, fmt.Errorf("execute error" + msg)
+	}
+	a.form = form
+	return html, nil
+}
+
+func getFormValue(html, name string) string {
+	return getMatched(html, `<input\s[^>]*?name="`+name+`"[^>]*?value="([^"]*)"`, "")
+}
+
+func getMatched(htmlStr, reStr, def string) string {
+	return common.GetMatched(htmlStr, reStr, def)
 }
