@@ -194,22 +194,34 @@ func (a *Account) GetRegistered() (map[string]string, error) {
 		"FORM_SUBMIT":        "1",
 		"FORM:_link_hidden_": "FORM:_idJsp430",
 	}
-	_, err = a.post("mainservice/Transfer/TransferMenu/TransferMenu/TransferMenu", params)
+	res, err := a.post("mainservice/Transfer/TransferMenu/TransferMenu/TransferMenu", params)
 	if err != nil {
 		return nil, err
 	}
-	// TODO
-	return nil, nil
+
+	re1 := regexp.MustCompile(`(?s)<tr>\s*<td[^>]*>\s*<div class="innercellline">.*?<input id="SELECT_REGISTER_ACCOUNT:_idJsp431:[^>]+>\s*</div>\s*</td>\s*</tr>`)
+	list := map[string]string{}
+	for _, match := range re1.FindAllString(res, -1) {
+		// log.Println(match)
+		name := getMatched(match, `(?s)<div class="innercellline">\s*<span[^>]*>([^<]+)</span>`, "")
+		id := getMatched(match, `<input [^>]*name="SELECT_REGISTER_ACCOUNT:_idJsp431:(\w+):_idJsp446"`, "")
+		if name != "" && id != "" {
+			list[name] = id
+		}
+	}
+	return list, nil
 }
 
 // transfar api
-// FIXME: targetName = registered index (0,1,2...)
 func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTransaction, error) {
-	_, err := a.GetRegistered()
+	registered, err := a.GetRegistered()
 	if err != nil {
 		return nil, err
 	}
-	n := targetName // TODO
+	n, ok := registered[targetName]
+	if !ok {
+		return nil, fmt.Errorf("not registered: %s in %v", targetName, registered)
+	}
 
 	params := map[string]string{
 		"SELECT_REGISTER_ACCOUNT_SUBMIT":                        "1",
@@ -235,7 +247,7 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTra
 	if err != nil {
 		return nil, err
 	}
-	log.Println(res)
+	// log.Println(res)
 
 	token := getMatched(res, `name="SECURITY_BOARD:TOKEN" [^>]*value="([^"]*)"`, "")
 	fee := getMatched(res, `(?s)振込手数料</div>\s*</th>\s*<td[^>]*>\s*(.*?)</td>`, "")
