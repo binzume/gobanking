@@ -1,11 +1,11 @@
 package rakuten
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -15,22 +15,19 @@ import (
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
 
-	"../common" // TODO
+	"github.com/binzume/go-banking/common"
 )
 
 type Account struct {
 	common.BankAccount
 
-	client    *http.Client
-	userAgent string
-	sequence  int
+	client   *http.Client
+	sequence int
 
 	balance   int64
 	userName  string
 	lastLogin time.Time
 }
-
-type TempTransaction map[string]string
 
 var _ common.Account = &Account{}
 
@@ -39,14 +36,11 @@ const BankName = "楽天銀行"
 const baseurl = "https://fes.rakuten-bank.co.jp/MS/main/"
 
 func Login(id, password string, params interface{}) (*Account, error) {
-	jar, err := cookiejar.New(nil)
+	client, err := common.NewHttpClient()
 	if err != nil {
 		return nil, err
 	}
-	a := &Account{
-		client:    &http.Client{Jar: jar},
-		userAgent: "Mozilla/5.0 NetBankingtClient/0.1",
-	}
+	a := &Account{client: client}
 	err = a.Login(id, password, params)
 	return a, err
 }
@@ -135,7 +129,6 @@ func (a *Account) Recent() ([]*common.Transaction, error) {
 
 	trs := []*common.Transaction{}
 	for _, match := range re1.FindAllStringSubmatch(res, -1) {
-		// log.Println(match[1])
 		cell := re2.FindAllStringSubmatch(match[1], -1)
 		if len(cell) > 3 {
 			var tr common.Transaction
@@ -145,7 +138,7 @@ func (a *Account) Recent() ([]*common.Transaction, error) {
 			tr.Description = cell[1][1]
 			cell[2][1] = strings.TrimSpace(re3.ReplaceAllString(cell[2][1], ""))
 			tr.Amount, _ = strconv.ParseInt(strings.Replace(cell[2][1], ",", "", -1), 10, 32)
-			// balance = cell[3][1]
+			tr.Balance, _ = strconv.ParseInt(strings.Replace(cell[3][1], ",", "", -1), 10, 32)
 			trs = append(trs, &tr)
 		}
 	}
@@ -166,7 +159,6 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 		"FORM_DOWNLOAD:DOWNLOAD_TYPE":            "0",
 	}
 	res, err := a.post("mainservice/Inquiry/CreditDebitInquiry/CreditDebitInquiry/CreditDebitInquiry", params)
-	a.sequence-- // FIXME (no redirect response?)
 	trs := []*common.Transaction{}
 	for _, line := range strings.Split(res, "\n")[1:] {
 		var row = strings.Split(line, ",")
@@ -176,7 +168,7 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 				tr.Date = t
 			}
 			tr.Amount, _ = strconv.ParseInt(row[1], 10, 64)
-			// tr.Balance, _ = strconv.ParseInt(row[2], 10, 64)
+			tr.Balance, _ = strconv.ParseInt(row[2], 10, 64)
 			tr.Description = row[3]
 			trs = append(trs, &tr)
 		}
@@ -213,13 +205,14 @@ func (a *Account) GetRegistered() (map[string]string, error) {
 }
 
 // transfar api
-func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTransaction, error) {
+func (a *Account) NewTransactionWithNick(targetName string, amount int64) (common.TempTransaction, error) {
 	registered, err := a.GetRegistered()
 	if err != nil {
 		return nil, err
 	}
 	n, ok := registered[targetName]
 	if !ok {
+		// TODO: retry GetRegistered("self")
 		return nil, fmt.Errorf("not registered: %s in %v", targetName, registered)
 	}
 
@@ -256,16 +249,21 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTra
 	if token == "" {
 		err = fmt.Errorf("get token error")
 	}
-	return TempTransaction{"token": token, "fee": fee, "date": date, "to": to}, err
+	feeint, _ := strconv.Atoi(strings.Replace(fee, ",", "", -1))
+	return common.TempTransactionMap{"token": token, "fee_msg": fee, "fee": int(feeint), "date": date, "to": to, "amount": amount}, err
 }
 
-func (a *Account) Commit(tr TempTransaction, pass2 string) (string, error) {
+func (a *Account) CommitTransaction(tr common.TempTransaction, pass2 string) (string, error) {
+	tr1, ok := tr.(common.TempTransactionMap)
+	if !ok {
+		return "", errors.New("invalid paramter type: tr")
+	}
 	params := map[string]string{
 		"SECURITY_BOARD_SUBMIT:1":      "1",
 		"SECURITY_BOARD:_link_hidden_": "",
 		"SECURITY_BOARD:_idJsp905":     "SECURITY_BOARD:_idJsp905",
 		"SECURITY_BOARD:USER_PASSWORD": pass2, // TODO
-		"SECURITY_BOARD:TOKEN":         tr["token"],
+		"SECURITY_BOARD:TOKEN":         tr1["token"].(string),
 	}
 	res, err := a.post("mainservice/Transfer/Basic/Basic/BasicConfirm", params)
 	return res, err
@@ -277,7 +275,7 @@ func (a *Account) get(path string) (string, error) {
 		return "", err
 	}
 
-	log.Println("GET", path)
+	// log.Println("GET", path)
 	a.sequence += 2
 	return a.request(req)
 }
@@ -295,13 +293,12 @@ func (a *Account) post(cmd string, params map[string]string) (string, error) {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	log.Println("POST", cmd, values.Encode())
+	// log.Println("POST", cmd, values.Encode())
 	a.sequence++
 	return a.request(req)
 }
 
 func (a *Account) request(req *http.Request) (string, error) {
-	req.Header.Set("User-Agent", a.userAgent)
 	res, err := a.client.Do(req)
 	if err != nil {
 		return "", err
@@ -313,7 +310,10 @@ func (a *Account) request(req *http.Request) (string, error) {
 		return "", err
 	}
 	doc := string(b)
-	// log.Println(getMatched(doc, `name="jsf_sequence" [^>]*value=["'](\d+)["']`, "not found"))
+	if seq := getMatched(doc, `name="jsf_sequence" [^>]*value=["'](\d+)["']`, ""); seq != "" {
+		s, _ := strconv.Atoi(seq)
+		a.sequence = s
+	}
 	if msg := getMatched(doc, `class="errortxt">(.+?)</`, ""); msg != "" {
 		return doc, fmt.Errorf("ERROR: %s", msg)
 	}

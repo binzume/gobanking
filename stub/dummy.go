@@ -3,13 +3,11 @@ package stub
 import (
 	"time"
 
-	"../common"
+	"github.com/binzume/go-banking/common"
 )
 
 type Account struct {
 }
-
-type TempTransaction map[string]interface{}
 
 const BankCode = "9999"
 
@@ -46,10 +44,10 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 }
 
 // transfar api
-func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTransaction, error) {
+func (a *Account) NewTransactionWithNick(targetName string, amount int64) (common.TempTransaction, error) {
 	return nil, nil
 }
 
-func (a *Account) Commit(tr TempTransaction, pass2 string) (string, error) {
+func (a *Account) CommitTransaction(tr common.TempTransaction, pass2 string) (string, error) {
 	return "dummy", nil
 }

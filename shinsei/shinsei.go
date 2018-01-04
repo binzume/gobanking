@@ -7,13 +7,12 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 
-	"../common" // TODO
+	"github.com/binzume/go-banking/common"
 )
 
 type SubAccount struct {
@@ -26,8 +25,7 @@ type SubAccount struct {
 }
 
 type Account struct {
-	client    *http.Client
-	userAgent string
+	client *http.Client
 
 	balance        int64
 	lastLogin      time.Time
@@ -36,24 +34,19 @@ type Account struct {
 	currentAccount *SubAccount
 }
 
-type TempTransaction map[string]string
-type P map[string]string
+var _ common.Account = &Account{}
 
 const BankCode = "0397"
 const baseUrl = "https://pdirect04.shinseibank.com/FLEXCUBEAt/LiveConnect.dll"
 
-var _ common.Account = &Account{}
+type P map[string]string
 
 func Login(id, password, numId string, grid []string) (*Account, error) {
-	jar, err := cookiejar.New(nil)
+	client, err := common.NewHttpClient()
 	if err != nil {
 		return nil, err
 	}
-	a := &Account{
-		client:    &http.Client{Jar: jar},
-		userAgent: "Mozilla/5.0 NetBankingtClient/0.1",
-	}
-
+	a := &Account{client: client}
 	err = a.Login(id, password, map[string]interface{}{
 		"numId": numId,
 		"grid":  grid,
@@ -67,17 +60,16 @@ func (a *Account) Login(id, password string, loginParams interface{}) error {
 	grid := paramsMap["grid"].([]string)
 
 	params := P{
-		"MfcISAPICommand": "EntryFunc",
-		"fldAppID":        "RT",
-		"fldTxnID":        "LGN",
-		"fldScrSeqNo":     "01",
-		"fldRequestorID":  "41",
-		"fldDeviceID":     "01",
-		"fldLangID":       "JPN",
-		"fldUserID":       id,
-		"fldUserNumId":    numId,
-		"fldUserPass":     password,
-		"fldRegAuthFlag":  "A",
+		"fldAppID":       "RT",
+		"fldTxnID":       "LGN",
+		"fldScrSeqNo":    "01",
+		"fldRequestorID": "41",
+		"fldDeviceID":    "01",
+		"fldLangID":      "JPN",
+		"fldUserID":      id,
+		"fldUserNumId":   numId,
+		"fldUserPass":    password,
+		"fldRegAuthFlag": "A",
 	}
 	values, err := a.execute(params)
 	if err != nil {
@@ -88,7 +80,6 @@ func (a *Account) Login(id, password string, loginParams interface{}) error {
 	log.Println(values)
 
 	_, err = a.execute(P{
-		"MfcISAPICommand":   "EntryFunc",
 		"fldAppID":          "RT",
 		"fldTxnID":          "LGN",
 		"fldScrSeqNo":       "41",
@@ -139,12 +130,11 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 		toStr = fmt.Sprintf("%04d%02d%02d", to.Year(), to.Month(), to.Day())
 	}
 	values, err := a.execute(P{
-		"MfcISAPICommand": "EntryFunc",
-		"fldAppID":        "RT",
-		"fldTxnID":        "ACA",
-		"fldScrSeqNo":     "01",
-		"fldRequestorID":  "9",
-		"fldSessionID":    a.ssid,
+		"fldAppID":       "RT",
+		"fldTxnID":       "ACA",
+		"fldScrSeqNo":    "01",
+		"fldRequestorID": "9",
+		"fldSessionID":   a.ssid,
 
 		"fldAcctID":     a.currentAccount.Id,
 		"fldAcctType":   a.currentAccount.Type,
@@ -159,7 +149,8 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 	})
 	trs := []*common.Transaction{}
 	for i := 0; i < 999; i++ {
-		date, ok := values[fmt.Sprintf("fldDate[%d]", i)]
+		suffix := fmt.Sprintf("[%d]", i)
+		date, ok := values["fldDate"+suffix]
 		if !ok {
 			break
 		}
@@ -167,27 +158,31 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 		if t, err := time.Parse("2006/01/02", date); err == nil {
 			tr.Date = t
 		}
-		tr.Description = values[fmt.Sprintf("fldDesc[%d]", i)]
-		tr.Amount, _ = strconv.ParseInt(values[fmt.Sprintf("fldAmount[%d]", i)], 10, 64)
-		trs = append(trs, &tr)
+		tr.Description = values["fldDesc"+suffix]
+		tr.Amount, _ = strconv.ParseInt(values["fldAmount"+suffix], 10, 64)
+		tr.Balance, _ = strconv.ParseInt(values["fldRunningBalanceRaw"+suffix], 10, 64)
+		if values["fldDRCRFlag"+suffix] == "D" {
+			tr.Amount = -tr.Amount
+		}
+		if tr.Description != "Closing Balance" {
+			trs = append(trs, &tr)
+		}
 	}
 	return trs, err
 }
 
 // transfar api
-func (a *Account) NewTransactionWithNick(targetName string, amount int64) (TempTransaction, error) {
+func (a *Account) NewTransactionWithNick(targetName string, amount int64) (common.TempTransaction, error) {
 	values, err := a.execute(P{
-		"MfcISAPICommand": "EntryFunc",
-		"fldAppID":        "RT",
-		"fldTxnID":        "ZNT",
-		"fldScrSeqNo":     "00",
-		"fldRequestorID":  "71",
-		"fldSessionID":    a.ssid,
+		"fldAppID":       "RT",
+		"fldTxnID":       "ZNT",
+		"fldScrSeqNo":    "00",
+		"fldRequestorID": "71",
+		"fldSessionID":   a.ssid,
 	})
 	if err != nil {
 		return nil, err
 	}
-	log.Println(values)
 
 	type TargetAccount struct {
 		Id, Type, Name, Bank, BankKanji, BankKana, Branch, BranchKanji, BranchKana string
@@ -231,12 +226,11 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int64) (TempT
 	// rem := fldRemReimburse
 
 	values, err = a.execute(P{
-		"MfcISAPICommand": "EntryFunc",
-		"fldAppID":        "RT",
-		"fldTxnID":        "ZNT",
-		"fldScrSeqNo":     "07",
-		"fldRequestorID":  "74",
-		"fldSessionID":    a.ssid,
+		"fldAppID":       "RT",
+		"fldTxnID":       "ZNT",
+		"fldScrSeqNo":    "07",
+		"fldRequestorID": "74",
+		"fldSessionID":   a.ssid,
 
 		"fldAcctId":       a.currentAccount.Id,
 		"fldAcctType":     a.currentAccount.Type,
@@ -263,19 +257,20 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int64) (TempT
 	if err != nil {
 		return nil, err
 	}
-	// fee := fldTransferFee - fldReimbursedAmt
-
-	return values, nil
+	feemsg := values["fldTransferFee"] + " - " + values["fldReimbursedAmt"]
+	fee, _ := strconv.Atoi(values["fldTransferFee"])
+	return common.TempTransactionMap{"values": values, "fee": fee, "fee_msg": feemsg, "amount": amount}, nil
 }
 
-func (a *Account) Commit(tr TempTransaction, pass2 string) (string, error) {
+func (a *Account) CommitTransaction(tr common.TempTransaction, pass2 string) (string, error) {
+	tr1 := tr.(common.TempTransactionMap)
+	values := tr1["values"].(map[string]string)
 	params := P{
-		"MfcISAPICommand": "EntryFunc",
-		"fldAppID":        "RT",
-		"fldTxnID":        "ZNT",
-		"fldScrSeqNo":     "08",
-		"fldRequestorID":  "76",
-		"fldSessionID":    a.ssid,
+		"fldAppID":       "RT",
+		"fldTxnID":       "ZNT",
+		"fldScrSeqNo":    "08",
+		"fldRequestorID": "76",
+		"fldSessionID":   a.ssid,
 	}
 	fields := []string{
 		"fldAcctId", "fldAcctType", "fldAcctDesc", "fldRemitterName",
@@ -285,10 +280,10 @@ func (a *Account) Commit(tr TempTransaction, pass2 string) (string, error) {
 		"fldTransferType", "fldReimbursedAmt", "fldRemReimburse",
 		"fldMemo", "fldInvoicePosition", "fldTransferType", "fldTransferDate",
 	}
-	params["fldTransferAmount"] = tr["fldTransferAmountUnformatted"]
-	params["fldTransferFee"] = tr["fldTransferFeeUnformatted"]
+	params["fldTransferAmount"] = values["fldTransferAmountUnformatted"]
+	params["fldTransferFee"] = values["fldTransferFeeUnformatted"]
 	for _, f := range fields {
-		if v, ok := tr[f]; ok {
+		if v, ok := values[f]; ok {
 			params[f] = v
 		} else {
 			log.Println("fields not found", f)
@@ -304,12 +299,11 @@ func (a *Account) Commit(tr TempTransaction, pass2 string) (string, error) {
 
 func (a *Account) ReloadTopPage() error {
 	values, err := a.execute(P{
-		"MfcISAPICommand": "EntryFunc",
-		"fldAppID":        "RT",
-		"fldTxnID":        "ACS",
-		"fldScrSeqNo":     "00",
-		"fldRequestorID":  "23",
-		"fldSessionID":    a.ssid,
+		"fldAppID":       "RT",
+		"fldTxnID":       "ACS",
+		"fldScrSeqNo":    "00",
+		"fldRequestorID": "23",
+		"fldSessionID":   a.ssid,
 
 		"fldAcctID":     "", // 400????
 		"fldAcctType":   "CHECKING",
@@ -347,6 +341,7 @@ func (a *Account) ReloadTopPage() error {
 
 func (a *Account) execute(params P) (map[string]string, error) {
 	values := url.Values{}
+	values.Set("MfcISAPICommand", "EntryFunc")
 	for k, v := range params {
 		values.Set(k, v)
 	}
@@ -356,7 +351,6 @@ func (a *Account) execute(params P) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", a.userAgent)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	res, err := a.client.Do(req)

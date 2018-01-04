@@ -11,7 +11,8 @@ type Account interface {
 	LastLogin() (time.Time, error)
 	Recent() ([]*Transaction, error)
 	History(from, to time.Time) ([]*Transaction, error)
-	// NewTransactionWithNick(targetName string, amount int) (TempTransaction, error)
+	NewTransactionWithNick(targetName string, amount int64) (TempTransaction, error)
+	CommitTransaction(tr TempTransaction, passwd string) (string, error)
 }
 
 type BankAccount struct {
@@ -26,12 +27,11 @@ type BankAccount struct {
 type Transaction struct {
 	Date        time.Time
 	Amount      int64
+	Balance     int64
 	Description string
 }
 
 type TempTransaction interface {
 	Amount() int64
-	Fee() int
 	FeeMessage() string
-	Commit(params interface{}) (string, error)
 }

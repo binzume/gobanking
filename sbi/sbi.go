@@ -4,7 +4,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"strconv"
 	"strings"
@@ -13,14 +12,13 @@ import (
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
 
-	"../common" // TODO
+	"github.com/binzume/go-banking/common"
 )
 
 type Account struct {
 	common.BankAccount
 	balance   int64
 	client    *http.Client
-	userAgent string
 	lastLogin time.Time
 }
 
@@ -28,20 +26,16 @@ const BankCode = "0038"
 const BankName = "住信SBIネット銀行"
 const baseUrl = "https://www.netbk.co.jp/wpl/NBGate/"
 
-type TempTransaction map[string]interface{}
 type P map[string]string
 
 var _ common.Account = &Account{}
 
 func Login(id, password string) (*Account, error) {
-	jar, err := cookiejar.New(nil)
+	client, err := common.NewHttpClient()
 	if err != nil {
 		return nil, err
 	}
-	a := &Account{
-		client:    &http.Client{Jar: jar},
-		userAgent: "Mozilla/5.0 NetBankingtClient/0.1",
-	}
+	a := &Account{client: client}
 	err = a.Login(id, password, nil)
 	return a, err
 }
@@ -106,11 +100,11 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 }
 
 // transfar api
-func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTransaction, error) {
+func (a *Account) NewTransactionWithNick(targetName string, amount int64) (common.TempTransaction, error) {
 	return nil, nil
 }
 
-func (a *Account) Commit(tr TempTransaction, pass2 string) (string, error) {
+func (a *Account) CommitTransaction(tr common.TempTransaction, pass2 string) (string, error) {
 	return "dummy", nil
 }
 
@@ -125,7 +119,6 @@ func (a *Account) post(path string, params P) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", a.userAgent)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	res, err := a.client.Do(req)
@@ -146,7 +139,6 @@ func (a *Account) get(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", a.userAgent)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	res, err := a.client.Do(req)

@@ -1,19 +1,19 @@
 package mizuho
 
 import (
+	"errors"
 	"fmt"
 	"html"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"../common" // TODO
+	"github.com/binzume/go-banking/common"
 
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
@@ -23,9 +23,9 @@ import (
 type Account struct {
 	common.BankAccount
 
-	baseUrl string
 	client  *http.Client
 	form    map[string]string
+	baseUrl string
 
 	recent    []*common.Transaction
 	balance   int64
@@ -41,14 +41,11 @@ const MizuhoUrl = "https://web1.ib.mizuhobank.co.jp/servlet/"
 const DummyFingerPrint = "version%3D3%2E2%2E0%2E0%5F3%26pm%5Ffpua%3Dmozilla"
 
 func Login(id, password string, qa map[string]string) (*Account, error) {
-	jar, err := cookiejar.New(nil)
+	client, err := common.NewHttpClient()
 	if err != nil {
 		return nil, err
 	}
-	a := &Account{
-		baseUrl: MizuhoUrl,
-		client:  &http.Client{Jar: jar},
-	}
+	a := &Account{client: client, baseUrl: MizuhoUrl}
 	err = a.Login(id, password, qa)
 	return a, err
 }
@@ -121,7 +118,7 @@ func (a *Account) GetRegistered() (map[string]string, error) {
 	return registered, nil
 }
 
-func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTransaction, error) {
+func (a *Account) NewTransactionWithNick(targetName string, amount int64) (common.TempTransaction, error) {
 	registered, err := a.GetRegistered()
 	if err != nil {
 		return nil, err
@@ -165,7 +162,7 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTra
 		return nil, fmt.Errorf("error pass2 get digits.: %v", pp)
 	}
 
-	tr := map[string]interface{}{
+	tr := common.TempTransactionMap{
 		"pass2_digits": pp,
 		"next":         "TRNTRN0508001B",
 	}
@@ -178,8 +175,12 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int) (TempTra
 	return tr, nil
 }
 
-func (a *Account) Commit(tr TempTransaction, pass2 string) (string, error) {
-	pp := tr["pass2_digits"].([]int)
+func (a *Account) CommitTransaction(tr common.TempTransaction, pass2 string) (string, error) {
+	tr1, ok := tr.(common.TempTransactionMap)
+	if !ok {
+		return "", errors.New("invalid paramter type: tr")
+	}
+	pp := tr1["pass2_digits"].([]int)
 	res, err := a.execute("TRNTRN0508001B", map[string]string{
 		"PASSWD_ScndPwd1":   string(pass2[pp[0]-1]),
 		"PASSWD_ScndPwd2":   string(pass2[pp[1]-1]),
@@ -192,11 +193,11 @@ func (a *Account) Commit(tr TempTransaction, pass2 string) (string, error) {
 }
 
 func (a *Account) parseTopPage(doc string) error {
-	a.recent = a.parseHistory(doc)
 
 	if m := getMatched(doc, `<span\s+id="txtCrntBal"[^>]*>([\d,]+)`, ""); m != "" {
 		a.balance, _ = strconv.ParseInt(strings.Replace(m, ",", "", -1), 10, 64)
 	}
+	a.recent = a.parseHistory(doc, a.balance)
 
 	a.BankCode = BankCode
 	a.BankName = BankName
@@ -235,7 +236,7 @@ func (a *Account) sendAikotoba(html string, qa map[string]string) (string, error
 	return html, nil
 }
 
-func (a *Account) parseHistory(doc string) []*common.Transaction {
+func (a *Account) parseHistory(doc string, balance int64) []*common.Transaction {
 	re := regexp.MustCompile(`(?s)<span\s+id="txtDate_.*?</tr>`)
 	dateRe := regexp.MustCompile(`(?s)<span\s+id="txtDate_\d+">([^<]*)<`)
 	descRe := regexp.MustCompile(`(?s)<span\s+id="txtTransCntnt_\d+">([^<]*)`)
@@ -264,6 +265,12 @@ func (a *Account) parseHistory(doc string) []*common.Transaction {
 		}
 		trs = append(trs, &tr)
 	}
+	if balance >= 0 {
+		for i := len(trs) - 1; i >= 0; i-- {
+			trs[i].Balance = balance
+			balance -= trs[i].Amount
+		}
+	}
 	return trs
 }
 
@@ -290,7 +297,7 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 		"lstDateToDay":     fmt.Sprint(to.Day()),
 	}, true)
 
-	return a.parseHistory(res), err
+	return a.parseHistory(res, -1), err
 }
 
 func (a *Account) execute(pageId string, params map[string]string, check bool) (string, error) {
@@ -328,7 +335,6 @@ func (a *Account) fetch(pageId string) (string, error) {
 }
 
 func (a *Account) request(req *http.Request) (string, error) {
-	req.Header.Set("User-Agent", "Mozilla/5.0 MizuhoDirectClient/0.1")
 	res, err := a.client.Do(req)
 	if err != nil {
 		return "", err

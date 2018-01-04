@@ -70,16 +70,19 @@ T.B.D.
 ### 送金
 
 登録済みの口座に対してのみ振り込めます．
-一応動きますが，インターフェイスとか色々整理中です．
+ 一応動きますが，インターフェイスとか色々整理中です．
+
+`NewTransactionWithNick()` で登録済みの口座への振込情報を作成し，`CommitTransaction()` で確定．
+
 
 ```golang
-	tr, err := acc.NewTransactionWithNick("登録済み振込先名", 10000)
+	tr, err := acc.NewTransactionWithNick("binzume", 5000000000000000)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println(tr)
 
-	recptNo, err := acc.Commit(tr, "暗証番号等")
+	recptNo, err := acc.CommitTransaction(tr, "123456(暗証番号等)")
 	log.Println(recptNo, err)
 ```
 
@@ -87,7 +90,6 @@ T.B.D.
 
 ## TODO
 
-- パッケージ名
 - 証券口座の操作
 - ドキュメント
 
