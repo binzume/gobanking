@@ -1,4 +1,6 @@
 logs/
 *.exe
 *.log
-*/accounts/
+*/accounts/*.json
+!*/accounts/stub.json
+

@@ -3,8 +3,9 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
-	"log"
+	"os"
 
 	// TODO replace .. to github.com/binzume/go-banking
 	"../mizuho"
@@ -62,50 +63,51 @@ func login(path string) (common.Account, error) {
 }
 
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Println(" Usage: go run account_info.go accounts/stub.json")
+		return
+	}
 
-	acc, err := login("accounts/stub.json")
+	// Login with json file.
+	acc, err := login(os.Args[1])
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println("Login error.", err)
+		return
 	}
 	defer acc.Logout()
 
-	log.Println(acc.LastLogin())
+	lastLogin, err := acc.LastLogin()
+	if err != nil {
+		fmt.Println("LastLogin error.", err)
+	}
+	fmt.Println("Last Login:", lastLogin)
 
 	// Print balance.
-	log.Println(acc.TotalBalance())
+	total, err := acc.TotalBalance()
+	if err != nil {
+		fmt.Println("TotalBalance error.", err)
+	}
+	fmt.Println("Balance:", total)
 
 	// Print recent logs.
 	trs, err := acc.Recent()
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println("Get recent history error.", err)
 	}
+	fmt.Println("--------")
 	for _, tr := range trs {
-		log.Println(tr.Date, tr.Amount, tr.Description, tr.Balance)
+		fmt.Println(tr.Date, tr.Amount, tr.Description, tr.Balance)
 	}
+	fmt.Println("--------")
 
-	// TODO
+	// Print History.
 	/*
 		trs, err = acc.History(time.Now().Add(-time.Hour*24*60), time.Now().Add(-time.Hour*24*20))
 		if err != nil {
 			log.Fatal(err)
 		}
 		for _, tr := range trs {
-			log.Println(tr.Date, tr.Amount, tr.Description, tr.Balance)
+			fmt.Println(tr.Date, tr.Amount, tr.Description, tr.Balance)
 		}
-	//*/
-	/*
-		tr, err := acc.NewTransactionWithNick("test", 1500000)
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Println(tr)
-	//*/
-	/*
-		recptNo, err := acc.CommitTransaction(tr, "00000000")
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Println("recptNo", recptNo)
-	//*/
-
+	*/
 }
