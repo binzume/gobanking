@@ -92,7 +92,8 @@ func (a *Account) Login(id, password string, loginparams interface{}) error {
 		return err
 	}
 
-	a.balance, _ = getMatchedInt(res, `(?s)（支払可能残高）.*?>\s*([0-9,]+)\s*<`)
+	a.balance, _ = getMatchedInt(res, `(?s)総額（評価額）.*?>\s*([0-9,]+)\s*<`)
+	// a.balance, _ = getMatchedInt(res, `(?s)（支払可能残高）.*?>\s*([0-9,]+)\s*<`)
 	lastLoginStr := getMatched(res, `>\s+前回ログイン日時\s+([^<]+?)\s+<`, "")
 	if t, err := time.Parse("2006/01/02 15:04:05", lastLoginStr); err == nil {
 		a.lastLogin = t
@@ -204,6 +205,31 @@ func (a *Account) GetRegistered() (map[string]string, error) {
 	return list, nil
 }
 
+func (a *Account) GetRegistered2() (map[string]string, error) {
+
+	params := map[string]string{
+		"SELECT_REGISTER_ACCOUNT_SUBMIT":        "1",
+		"SELECT_REGISTER_ACCOUNT:_link_hidden_": "SELECT_REGISTER_ACCOUNT:_idJsp416", // or 412(all)
+		"KANA_INDEX_KEY":                        "",
+	}
+	res, err := a.post("mainservice/Transfer/TransferMenu/TransferSelect/TransferSelect", params)
+	if err != nil {
+		return nil, err
+	}
+
+	re1 := regexp.MustCompile(`(?s)<tr>\s*<td[^>]*>\s*<div class="innercellline">.*?<input id="SELECT_REGISTER_ACCOUNT:_idJsp431:[^>]+>\s*</div>\s*</td>\s*</tr>`)
+	list := map[string]string{}
+	for _, match := range re1.FindAllString(res, -1) {
+		log.Println(match)
+		name := getMatched(match, `(?s)<div class="innercellline">\s*<span[^>]*>([^<]+)</span>`, "")
+		id := getMatched(match, `<input [^>]*name="SELECT_REGISTER_ACCOUNT:_idJsp431:(\w+):_idJsp446"`, "")
+		if name != "" && id != "" {
+			list[name] = id
+		}
+	}
+	return list, nil
+}
+
 // transfar api
 func (a *Account) NewTransactionWithNick(targetName string, amount int64) (common.TempTransaction, error) {
 	registered, err := a.GetRegistered()
@@ -212,8 +238,14 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int64) (commo
 	}
 	n, ok := registered[targetName]
 	if !ok {
-		// TODO: retry GetRegistered("self")
-		return nil, fmt.Errorf("not registered: %s in %v", targetName, registered)
+		registered, err = a.GetRegistered2()
+		if err != nil {
+			return nil, err
+		}
+		n, ok = registered[targetName]
+		if !ok {
+			return nil, fmt.Errorf("not registered: %s in %v", targetName, registered)
+		}
 	}
 
 	params := map[string]string{
@@ -228,15 +260,17 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int64) (commo
 	}
 	// log.Println(res)
 
+	action := getMatched(res, `name="FORM" [^>]*action="/MS/main/fcs/rb/fes/jsp/([^"]+)\.jsp"`, "")
+	btn := getMatched(res, `name="(FORM:_idJsp\d+)" [^>]*value="次へ（確認）"`, "")
 	params = map[string]string{
 		"FORM_SUBMIT":                "1",
 		"FORM:_link_hidden_":         "",
-		"FORM:_idJsp230":             "FORM:_idJsp230",
+		btn:                          btn, // _idJsp230 181
 		"FORM:COMMENT":               "",
 		"FORM:DEBIT_OWNER_NAME_KANA": common.ToSJIS(getMatched(res, `name="FORM:DEBIT_OWNER_NAME_KANA" [^>]*value="([^"]+)"`, "")),
 		"FORM:AMOUNT":                fmt.Sprint(amount),
 	}
-	res, err = a.post("mainservice/Transfer/Basic/Basic/BasicRegisteredInput", params)
+	res, err = a.post(action, params)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +284,10 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int64) (commo
 		err = fmt.Errorf("get token error")
 	}
 	feeint, _ := strconv.Atoi(strings.Replace(fee, ",", "", -1))
-	return common.TempTransactionMap{"token": token, "fee_msg": fee, "fee": int(feeint), "date": date, "to": to, "amount": amount}, err
+	btn = getMatched(res, `name="(SECURITY_BOARD:_idJsp\d+)" [^>]*value="振込実行"`, "")
+	action = getMatched(res, `name="SECURITY_BOARD" [^>]*action="/MS/main/fcs/rb/fes/jsp/([^"]+)\.jsp"`, "")
+	return common.TempTransactionMap{"token": token, "button": btn, "action": action,
+		"fee_msg": fee, "fee": int(feeint), "date": date, "to": to, "amount": amount}, err
 }
 
 func (a *Account) CommitTransaction(tr common.TempTransaction, pass2 string) (string, error) {
@@ -258,15 +295,17 @@ func (a *Account) CommitTransaction(tr common.TempTransaction, pass2 string) (st
 	if !ok {
 		return "", errors.New("invalid paramter type: tr")
 	}
+	button := tr1["button"].(string)
 	params := map[string]string{
-		"SECURITY_BOARD_SUBMIT:1":      "1",
+		"SECURITY_BOARD_SUBMIT":        "1",
 		"SECURITY_BOARD:_link_hidden_": "",
-		"SECURITY_BOARD:_idJsp905":     "SECURITY_BOARD:_idJsp905",
-		"SECURITY_BOARD:USER_PASSWORD": pass2, // TODO
+		"SECURITY_BOARD:USER_PASSWORD": pass2,
 		"SECURITY_BOARD:TOKEN":         tr1["token"].(string),
+		button:                         button, // _idJsp250
 	}
-	res, err := a.post("mainservice/Transfer/Basic/Basic/BasicConfirm", params)
-	return res, err
+	res, err := a.post(tr1["action"].(string), params)
+	recptNo := getMatched(res, `(?s)備考</div>\s*</th>\s*<td[^>]*>\s*<div class="innercell">\s*(\d+-\d+)\s*</div>`, res)
+	return recptNo, err
 }
 
 func (a *Account) get(path string) (string, error) {
