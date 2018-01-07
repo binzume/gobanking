@@ -3,11 +3,15 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
+	"strconv"
+	"strings"
 
 	// TODO replace .. to github.com/binzume/go-banking
 	"../mizuho"
@@ -65,8 +69,14 @@ func login(path string) (common.Account, error) {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println(" Usage: go run account_info.go accounts/stub.json")
+	if len(os.Args) < 4 {
+		fmt.Println(" Usage: go run trans.go accounts/stub.json targetname 10000")
+		return
+	}
+	target := os.Args[2]
+	amount, err := strconv.Atoi(os.Args[3])
+	if err != nil {
+		fmt.Println(" Usage: go run trans.go accounts/stub.json targetname 10000")
 		return
 	}
 
@@ -80,36 +90,36 @@ func main() {
 
 	lastLogin, err := acc.LastLogin()
 	if err != nil {
-		fmt.Println("LastLogin error.", err)
+		fmt.Println("LastLogin() error.", err)
 	}
 	fmt.Println("Last Login:", lastLogin)
 
 	// Print balance.
 	total, err := acc.TotalBalance()
 	if err != nil {
-		fmt.Println("TotalBalance error.", err)
+		fmt.Println("TotalBalance() error.", err)
 	}
 	fmt.Println("Balance:", total)
 
-	// Print recent logs.
-	trs, err := acc.Recent()
+	tr, err := acc.NewTransactionWithNick(target, int64(amount))
 	if err != nil {
-		fmt.Println("Get recent history error.", err)
+		fmt.Println(err)
+		return
 	}
-	fmt.Println("--------")
-	for _, tr := range trs {
-		fmt.Println(tr.Date, tr.Amount, tr.Description, tr.Balance)
-	}
-	fmt.Println("--------")
+	fmt.Println(tr)
 
-	// Print History.
-	/*
-		trs, err = acc.History(time.Now().Add(-time.Hour*24*60), time.Now().Add(-time.Hour*24*20))
-		if err != nil {
-			log.Fatal(err)
-		}
-		for _, tr := range trs {
-			fmt.Println(tr.Date, tr.Amount, tr.Description, tr.Balance)
-		}
-	*/
+	fmt.Print("Enter pass: ")
+	reader := bufio.NewReader(os.Stdin)
+	pass, _ := reader.ReadString('\n')
+	pass = strings.TrimSpace(pass)
+	if pass == "" {
+		fmt.Println("canceled")
+		return
+	}
+
+	recptId, err := acc.CommitTransaction(tr, pass)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("ok. recptId:", recptId)
 }
