@@ -77,7 +77,7 @@ func (a *Account) Login(id, password string, loginParams interface{}) error {
 	}
 
 	a.ssid = values["fldSessionID"]
-	log.Println(values)
+	// log.Println(values)
 
 	_, err = a.execute(P{
 		"fldAppID":          "RT",
@@ -289,15 +289,12 @@ func (a *Account) CommitTransaction(tr common.TempTransaction, pass2 string) (st
 	for _, f := range fields {
 		if v, ok := values[f]; ok {
 			params[f] = v
-		} else {
-			log.Println("fields not found", f)
 		}
 	}
 	values, err := a.execute(params)
 	if err != nil {
 		return "", err
 	}
-	log.Println(values)
 	return values["fldHostRef"], nil
 }
 
@@ -349,7 +346,7 @@ func (a *Account) execute(params P) (map[string]string, error) {
 	for k, v := range params {
 		values.Set(k, v)
 	}
-	log.Println("execute ", params)
+	// log.Println("execute ", params)
 
 	req, err := http.NewRequest("POST", baseUrl, strings.NewReader(values.Encode()))
 	if err != nil {

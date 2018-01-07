@@ -301,7 +301,7 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 }
 
 func (a *Account) execute(pageId string, params map[string]string, check bool) (string, error) {
-	log.Println("execute ", pageId, params)
+	// log.Println("execute ", pageId, params)
 
 	values := url.Values{}
 	for k, v := range a.form {
@@ -321,7 +321,7 @@ func (a *Account) execute(pageId string, params map[string]string, check bool) (
 }
 
 func (a *Account) fetch(pageId string) (string, error) {
-	log.Println("fetch ", pageId)
+	// log.Println("fetch ", pageId)
 	values := url.Values{}
 	for k, v := range a.form {
 		values.Set(k, v)
