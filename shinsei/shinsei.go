@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/binzume/go-banking/common"
+	"github.com/binzume/gobanking/common"
 )
 
 type SubAccount struct {

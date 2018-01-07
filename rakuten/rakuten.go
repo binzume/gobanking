@@ -15,7 +15,7 @@ import (
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
 
-	"github.com/binzume/go-banking/common"
+	"github.com/binzume/gobanking/common"
 )
 
 type Account struct {

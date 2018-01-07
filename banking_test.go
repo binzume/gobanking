@@ -3,12 +3,12 @@ package main
 import (
 	"testing"
 
-	"./mizuho"
-	"./rakuten"
-	"./sbi"
-	"./shinsei"
-	"./stub"
-	"github.com/binzume/go-banking/common"
+	"github.com/binzume/gobanking/common"
+	"github.com/binzume/gobanking/mizuho"
+	"github.com/binzume/gobanking/rakuten"
+	"github.com/binzume/gobanking/sbi"
+	"github.com/binzume/gobanking/shinsei"
+	"github.com/binzume/gobanking/stub"
 )
 
 func TestAccount(t *testing.T) {

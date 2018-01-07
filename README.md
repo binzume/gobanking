@@ -38,7 +38,7 @@ T.B.D.
 (みずほ銀行と楽天銀行はほぼ同じ．新生銀行はログイン時に全情報を渡す必要があります)
 
 ```golang
-import "github.com/binzume/go-banking/mizuho"
+import "github.com/binzume/gobanking/mizuho"
 
 func main() {
 	words := map[string]string{
