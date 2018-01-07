@@ -143,6 +143,11 @@ func (a *Account) Recent() ([]*common.Transaction, error) {
 			trs = append(trs, &tr)
 		}
 	}
+
+	// reverse
+	for i, j := 0, len(trs)-1; i < j; i, j = i+1, j-1 {
+		trs[i], trs[j] = trs[j], trs[i]
+	}
 	return trs, err
 }
 

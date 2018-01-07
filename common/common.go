@@ -5,13 +5,13 @@ import (
 )
 
 type Account interface {
-	Login(id, password string, params interface{}) error
+	Login(id, password string, params interface{}) error // Use: bankpkg.Login(...)
 	Logout() error
 	TotalBalance() (int64, error)
 	LastLogin() (time.Time, error)
 	Recent() ([]*Transaction, error)
 	History(from, to time.Time) ([]*Transaction, error)
-	NewTransactionWithNick(targetName string, amount int64) (TempTransaction, error)
+	NewTransactionWithNick(targetName string, amount int64) (TempTransaction, error) // TODO: Rename
 	CommitTransaction(tr TempTransaction, passwd string) (string, error)
 }
 
@@ -25,10 +25,10 @@ type BankAccount struct {
 }
 
 type Transaction struct {
-	Date        time.Time
-	Amount      int64
-	Balance     int64
-	Description string
+	Date        time.Time `json:"date"`
+	Amount      int64     `json:"amount"`
+	Balance     int64     `json:"balance"`
+	Description string    `json:"description"`
 }
 
 type TempTransaction interface {
