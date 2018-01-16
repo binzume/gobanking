@@ -236,7 +236,7 @@ func (a *Account) GetRegistered2() (map[string]string, error) {
 }
 
 // transfar api
-func (a *Account) NewTransactionWithNick(targetName string, amount int64) (common.TempTransaction, error) {
+func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64) (common.TransferState, error) {
 	registered, err := a.GetRegistered()
 	if err != nil {
 		return nil, err
@@ -291,12 +291,12 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int64) (commo
 	feeint, _ := strconv.Atoi(strings.Replace(fee, ",", "", -1))
 	btn = getMatched(res, `name="(SECURITY_BOARD:_idJsp\d+)" [^>]*value="振込実行"`, "")
 	action = getMatched(res, `name="SECURITY_BOARD" [^>]*action="/MS/main/fcs/rb/fes/jsp/([^"]+)\.jsp"`, "")
-	return common.TempTransactionMap{"token": token, "button": btn, "action": action,
+	return common.TransferStateMap{"token": token, "button": btn, "action": action,
 		"fee_msg": fee, "fee": int(feeint), "date": date, "to": to, "amount": amount}, err
 }
 
-func (a *Account) CommitTransaction(tr common.TempTransaction, pass2 string) (string, error) {
-	tr1, ok := tr.(common.TempTransactionMap)
+func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string, error) {
+	tr1, ok := tr.(common.TransferStateMap)
 	if !ok {
 		return "", errors.New("invalid paramter type: tr")
 	}

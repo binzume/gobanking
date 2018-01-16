@@ -100,11 +100,11 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 }
 
 // transfar api
-func (a *Account) NewTransactionWithNick(targetName string, amount int64) (common.TempTransaction, error) {
+func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64) (common.TransferState, error) {
 	return nil, nil
 }
 
-func (a *Account) CommitTransaction(tr common.TempTransaction, pass2 string) (string, error) {
+func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string, error) {
 	return "dummy", nil
 }
 

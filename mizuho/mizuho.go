@@ -31,7 +31,7 @@ type Account struct {
 	balance   int64
 	lastLogin time.Time
 }
-type TempTransaction map[string]interface{}
+type TransferState map[string]interface{}
 
 var _ common.Account = &Account{}
 
@@ -118,7 +118,7 @@ func (a *Account) GetRegistered() (map[string]string, error) {
 	return registered, nil
 }
 
-func (a *Account) NewTransactionWithNick(targetName string, amount int64) (common.TempTransaction, error) {
+func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64) (common.TransferState, error) {
 	registered, err := a.GetRegistered()
 	if err != nil {
 		return nil, err
@@ -162,7 +162,7 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int64) (commo
 		return nil, fmt.Errorf("error pass2 get digits.: %v", pp)
 	}
 
-	tr := common.TempTransactionMap{
+	tr := common.TransferStateMap{
 		"pass2_digits": pp,
 		"next":         "TRNTRN0508001B",
 	}
@@ -175,8 +175,8 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int64) (commo
 	return tr, nil
 }
 
-func (a *Account) CommitTransaction(tr common.TempTransaction, pass2 string) (string, error) {
-	tr1, ok := tr.(common.TempTransactionMap)
+func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string, error) {
+	tr1, ok := tr.(common.TransferStateMap)
 	if !ok {
 		return "", errors.New("invalid paramter type: tr")
 	}

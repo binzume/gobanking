@@ -59,14 +59,14 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 }
 
 // transfar api
-func (a *Account) NewTransactionWithNick(targetName string, amount int64) (common.TempTransaction, error) {
+func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64) (common.TransferState, error) {
 	if amount == 0 || targetName == "" {
 		return nil, errors.New("transfer error")
 	}
-	return common.TempTransactionMap{"fee": a.getInt("transfer_fee", 100), "amount": amount, "to": targetName}, nil
+	return common.TransferStateMap{"fee": a.getInt("transfer_fee", 100), "amount": amount, "to": targetName}, nil
 }
 
-func (a *Account) CommitTransaction(tr common.TempTransaction, pass2 string) (string, error) {
+func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string, error) {
 	if pass2 == "" {
 		return "", errors.New("commit error")
 	}

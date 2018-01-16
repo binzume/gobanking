@@ -1,4 +1,4 @@
-package main
+package banking
 
 import (
 	"testing"
@@ -18,4 +18,8 @@ func TestAccount(t *testing.T) {
 	var _ common.Account = &sbi.Account{}
 	var _ common.Account = &shinsei.Account{}
 	var _ common.Account = &stub.Account{}
+	_, err := LoginWithJsonFile("examples/accounts/stub.json")
+	if err != nil {
+		t.Errorf("login failed %v", err)
+	}
 }

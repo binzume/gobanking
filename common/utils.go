@@ -46,14 +46,14 @@ func (t *AgentSetter) RoundTrip(req *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(req)
 }
 
-type TempTransactionMap map[string]interface{}
+type TransferStateMap map[string]interface{}
 
-func (tr TempTransactionMap) Amount() int64 {
+func (tr TransferStateMap) Amount() int64 {
 	return tr["amount"].(int64)
 }
-func (tr TempTransactionMap) Fee() int {
+func (tr TransferStateMap) Fee() int {
 	return tr["fee"].(int)
 }
-func (tr TempTransactionMap) FeeMessage() string {
+func (tr TransferStateMap) FeeMessage() string {
 	return tr["fee_msg"].(string)
 }

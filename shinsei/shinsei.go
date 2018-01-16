@@ -176,7 +176,7 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 }
 
 // transfar api
-func (a *Account) NewTransactionWithNick(targetName string, amount int64) (common.TempTransaction, error) {
+func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64) (common.TransferState, error) {
 	values, err := a.execute(P{
 		"fldAppID":       "RT",
 		"fldTxnID":       "ZNT",
@@ -263,11 +263,11 @@ func (a *Account) NewTransactionWithNick(targetName string, amount int64) (commo
 	}
 	feemsg := values["fldTransferFee"] + " - " + values["fldReimbursedAmt"]
 	fee, _ := strconv.Atoi(values["fldTransferFee"])
-	return common.TempTransactionMap{"values": values, "fee": fee, "fee_msg": feemsg, "amount": amount}, nil
+	return common.TransferStateMap{"values": values, "fee": fee, "fee_msg": feemsg, "amount": amount}, nil
 }
 
-func (a *Account) CommitTransaction(tr common.TempTransaction, pass2 string) (string, error) {
-	tr1 := tr.(common.TempTransactionMap)
+func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string, error) {
+	tr1 := tr.(common.TransferStateMap)
 	values := tr1["values"].(map[string]string)
 	params := P{
 		"fldAppID":       "RT",

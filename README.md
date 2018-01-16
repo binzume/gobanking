@@ -33,8 +33,22 @@ T.B.D.
 
 ### ログイン
 
-みずほダイレクトの場合.
-ネットバンキングサイトによって引数が多少変わります．
+[jsonファイル](examples/README.md)に書かれたアカウント情報を使う場合．
+
+```golang
+import "github.com/binzume/gobanking"
+
+func main() {
+	acc, err := banking.LoginWithJsonFile("account/mizuho.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer acc.Logout()
+	// ...
+```
+
+または，個々のパッケージのLoginを直接呼んでも問題ありません．(みずほダイレクトの場合).
+ネットバンキングサイトによってログイン時の引数やインターフェイスが多少変わります．
 (みずほ銀行と楽天銀行はほぼ同じ．新生銀行はログイン時に全情報を渡す必要があります)
 
 ```golang
@@ -51,6 +65,8 @@ func main() {
 	defer acc.Logout()
 	// ...
 ```
+
+
 
 ### 残高取得
 
@@ -76,17 +92,17 @@ func main() {
 登録済みの口座に対してのみ振り込めます．
  一応動きますが，インターフェイスとか色々整理中です．
 
-`NewTransactionWithNick()` で登録済みの口座への振込情報を作成し，`CommitTransaction()` で確定．
+`NewTransferToRegisteredAccount()` で登録済みの口座への振込情報を作成し，`CommitTransfer()` で確定．
 
 
 ```golang
-	tr, err := acc.NewTransactionWithNick("binzume", 5000000000000000)
+	tr, err := acc.NewTransferToRegisteredAccount("binzume", 5000000000000000)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println(tr)
 
-	recptNo, err := acc.CommitTransaction(tr, "123456(暗証番号等)")
+	recptNo, err := acc.CommitTransfer(tr, "123456(暗証番号等)")
 	log.Println(recptNo, err)
 ```
 
@@ -101,4 +117,4 @@ func main() {
 
 - このライブラリの挙動について，何の保証もできません
 - 最悪，口座を凍結されたりお金がなくなっても，まぁいいか，と思える範囲で使ってください
-- (実際，激しく使ってると，アカウントロックされる銀行があります...)
+- (実際，激しく使ってると，アカウントロックされる可能性があります...)
