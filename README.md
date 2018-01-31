@@ -1,5 +1,8 @@
 # Internet Banking fo Golang
 
+[![Build Status](https://travis-ci.org/binzume/gobanking.svg)](https://travis-ci.org/binzume/gobanking)
+[![codecov](https://codecov.io/gh/binzume/gobanking/branch/master/graph/badge.svg)](https://codecov.io/gh/binzume/gobanking)
+
 Golangで銀行のサイトをスクレイピングして操作するためのライブラリです．
 昔Rubyで書いたものをGolangに移植したもの．
 
@@ -35,7 +38,7 @@ T.B.D.
 
 [jsonファイル](examples/README.md)に書かれたアカウント情報を使う場合．
 
-```golang
+```go
 import "github.com/binzume/gobanking"
 
 func main() {
@@ -51,7 +54,7 @@ func main() {
 ネットバンキングサイトによってログイン時の引数やインターフェイスが多少変わります．
 (みずほ銀行と楽天銀行はほぼ同じ．新生銀行はログイン時に全情報を渡す必要があります)
 
-```golang
+```go
 import "github.com/binzume/gobanking/mizuho"
 
 func main() {
@@ -65,7 +68,6 @@ func main() {
 	defer acc.Logout()
 	// ...
 ```
-
 
 
 ### 残高取得
