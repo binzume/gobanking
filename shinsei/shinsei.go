@@ -355,6 +355,9 @@ func (a *Account) execute(params P) (map[string]string, error) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	res, err := a.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
 	defer res.Body.Close()
 
 	b, err := ioutil.ReadAll(res.Body)

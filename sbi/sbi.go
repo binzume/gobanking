@@ -2,7 +2,6 @@ package sbi
 
 import (
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -113,35 +112,29 @@ func (a *Account) post(path string, params P) (string, error) {
 	for k, v := range params {
 		values.Set(k, v)
 	}
-	log.Println("POST", path, params)
 
 	req, err := http.NewRequest("POST", baseUrl+path, strings.NewReader(values.Encode()))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	res, err := a.client.Do(req)
-	defer res.Body.Close()
-
-	b, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return "", err
-	}
-	// TODO check error
-	return string(b), err
+	return a.request(req)
 }
 
 func (a *Account) get(path string) (string, error) {
-	log.Println("GET", path)
 
 	req, err := http.NewRequest("GET", baseUrl+path, nil)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return a.request(req)
+}
 
+func (a *Account) request(req *http.Request) (string, error) {
 	res, err := a.client.Do(req)
+	if err != nil {
+		return "", err
+	}
 	defer res.Body.Close()
 
 	b, err := ioutil.ReadAll(transform.NewReader(res.Body, japanese.ShiftJIS.NewDecoder()))

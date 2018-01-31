@@ -47,11 +47,13 @@ func Login(id, password string, params interface{}) (*Account, error) {
 
 func (a *Account) Login(id, password string, loginparams interface{}) error {
 	qa, _ := loginparams.(map[string]string)
-	_, err := a.get("RbS?CurrentPageID=START&&COMMAND=LOGIN")
+	_, err := a.get("RbS?CurrentPageID=START&COMMAND=LOGIN")
 	if err != nil {
 		return err
 	}
-	a.sequence = 1
+	if a.sequence != 1 {
+		return errors.New("invalid response")
+	}
 
 	params := map[string]string{
 		"LOGIN_SUBMIT":         "1",
@@ -87,7 +89,7 @@ func (a *Account) Login(id, password string, loginparams interface{}) error {
 		}
 	}
 
-	res, err = a.get("gns?COMMAND=BALANCE_INQUIRY_START&&CurrentPageID=HEADER_FOOTER_LINK")
+	res, err = a.get("gns?COMMAND=BALANCE_INQUIRY_START&CurrentPageID=HEADER_FOOTER_LINK")
 	if err != nil {
 		return err
 	}
@@ -110,7 +112,7 @@ func (a *Account) Login(id, password string, loginparams interface{}) error {
 }
 
 func (a *Account) Logout() error {
-	_, err := a.get("gns?COMMAND=LOGOUT_START&&CurrentPageID=HEADER_FOOTER_LINK")
+	_, err := a.get("gns?COMMAND=LOGOUT_START&CurrentPageID=HEADER_FOOTER_LINK")
 	return err
 }
 
@@ -183,7 +185,7 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 }
 
 func (a *Account) GetRegistered() (map[string]string, error) {
-	_, err := a.get("gns?COMMAND=TRANSFER_MENU_START&&CurrentPageID=HEADER_FOOTER_LINK")
+	_, err := a.get("gns?COMMAND=TRANSFER_MENU_START&CurrentPageID=HEADER_FOOTER_LINK")
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +227,7 @@ func (a *Account) GetRegistered2() (map[string]string, error) {
 	re1 := regexp.MustCompile(`(?s)<tr>\s*<td[^>]*>\s*<div class="innercellline">.*?<input id="SELECT_REGISTER_ACCOUNT:_idJsp431:[^>]+>\s*</div>\s*</td>\s*</tr>`)
 	list := map[string]string{}
 	for _, match := range re1.FindAllString(res, -1) {
-		log.Println(match)
+		// log.Println(match)
 		name := getMatched(match, `(?s)<div class="innercellline">\s*<span[^>]*>([^<]+)</span>`, "")
 		id := getMatched(match, `<input [^>]*name="SELECT_REGISTER_ACCOUNT:_idJsp431:(\w+):_idJsp446"`, "")
 		if name != "" && id != "" {
@@ -355,8 +357,7 @@ func (a *Account) request(req *http.Request) (string, error) {
 	}
 	doc := string(b)
 	if seq := getMatched(doc, `name="jsf_sequence" [^>]*value=["'](\d+)["']`, ""); seq != "" {
-		s, _ := strconv.Atoi(seq)
-		a.sequence = s
+		a.sequence, _ = strconv.Atoi(seq)
 	}
 	if msg := getMatched(doc, `class="errortxt">(.+?)</`, ""); msg != "" {
 		return doc, fmt.Errorf("ERROR: %s", msg)
