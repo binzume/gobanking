@@ -56,11 +56,11 @@ func (a *Account) Login(id, password string, loginparams interface{}) error {
 	}
 
 	params := map[string]string{
-		"LOGIN_SUBMIT":         "1",
-		"LOGIN:_link_hidden_":  "",
-		"LOGIN:_idJsp84":       "",
-		"LOGIN:USER_ID":        id,
-		"LOGIN:LOGIN_PASSWORD": password,
+		"LOGIN_SUBMIT":               "1",
+		"LOGIN:_link_hidden_":        "LOGIN:_idJsp41",
+		"LOGIN:LOGIN_PASSWORD_CHECK": "TOOLTIP_CHECK",
+		"LOGIN:USER_ID":              id,
+		"LOGIN:LOGIN_PASSWORD":       password,
 	}
 	res, err := a.post("mainservice/Security/LoginAuthentication/Login/Login", params)
 	if err != nil {
