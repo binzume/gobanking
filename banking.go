@@ -10,6 +10,7 @@ import (
 	"github.com/binzume/gobanking/rakuten"
 	"github.com/binzume/gobanking/sbi"
 	"github.com/binzume/gobanking/shinsei"
+	"github.com/binzume/gobanking/shinsei2"
 	"github.com/binzume/gobanking/stub"
 )
 
@@ -49,6 +50,8 @@ func Login(c *AccountConfig) (common.Account, error) {
 		}
 		return rakuten.Login(c.Id, c.Password, words)
 	case "shinsei":
+		return shinsei2.Login(c.Id, c.Password)
+	case "shinsei_old":
 		grid := []string{}
 		for _, f := range c.Options["grid"].([]interface{}) {
 			grid = append(grid, f.(string))
