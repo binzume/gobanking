@@ -1,111 +1,112 @@
 package shinsei
 
 import (
+	"encoding/json"
 	"time"
 
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/binzume/gobanking/common"
 )
 
-type SubAccount struct {
-	Id          string // 400xxxx or any
-	Type        string // CHECKING or SAVINGS
-	Curr        string // JPY or USD ...
-	Description string
-	BaseBalance int64
-	CurrBalance float64
-}
-
 type Account struct {
 	client *http.Client
 
-	balance        int64
-	lastLogin      time.Time
-	ssid           string
-	accounts       map[string]*SubAccount
-	currentAccount *SubAccount
+	instanceID    string
+	csrfToken     string
+	mainAccountNo string
+
+	balance           int64
+	lastLogin         time.Time
+	recentTransaction []*common.Transaction
+}
+
+type activityResponse struct {
+	AccountNo       string `json:"accountNo"`
+	CurrentBalance  string `json:"currentBalance"`
+	ActivityDetails []*struct {
+		PostingDate    string `json:"postingDate"`
+		Balance        int64  `json:"balance,string"`
+		Description    string `json:"description"`
+		TxnReferenceNo string `json:"txnReferenceNo"`
+		Debit          string `json:"debit"`
+		Credit         string `json:"credit"`
+	} `json:"activityDetails"`
+}
+
+type authStatusResponse struct {
+	AuthStatus string `json:"authStatus"`
+	Token      string `json:"token"`
 }
 
 var _ common.Account = &Account{}
 
 const BankCode = "0397"
-const baseUrl = "https://pdirect04.shinseibank.com/FLEXCUBEAt/LiveConnect.dll"
+const baseUrl = "https://bk.shinseibank.com/SFC/apps/services/"
 
 type P map[string]string
 
-func Login(id, password, numId string, grid []string) (*Account, error) {
+func Login(id, password string) (*Account, error) {
 	client, err := common.NewHttpClient()
 	if err != nil {
 		return nil, err
 	}
 	a := &Account{client: client}
-	err = a.Login(id, password, map[string]interface{}{
-		"numId": numId,
-		"grid":  grid,
-	})
+	err = a.Login(id, password, nil)
 	return a, err
 }
 
 func (a *Account) Login(id, password string, loginParams interface{}) error {
-	paramsMap := loginParams.(map[string]interface{})
-	numId := paramsMap["numId"].(string)
-	grid := paramsMap["grid"].([]string)
-
-	params := P{
-		"fldAppID":       "RT",
-		"fldTxnID":       "LGN",
-		"fldScrSeqNo":    "01",
-		"fldRequestorID": "41",
-		"fldDeviceID":    "01",
-		"fldLangID":      "JPN",
-		"fldUserID":      id,
-		"fldUserNumId":   numId,
-		"fldUserPass":    password,
-		"fldRegAuthFlag": "A",
-	}
-	values, err := a.execute(params)
+	err := a.init()
 	if err != nil {
 		return err
 	}
 
-	a.ssid = values["fldSessionID"]
-	// log.Println(values)
+	var securityConnectRes authStatusResponse
+	err = a.query("IFCM_CommonAdapter", "securityConnect", nil, &securityConnectRes)
+	if err != nil {
+		return err
+	}
+	if securityConnectRes.AuthStatus != "required" {
+		return fmt.Errorf("invalid authStatus: %v", securityConnectRes.AuthStatus)
+	}
 
-	_, err = a.execute(P{
-		"fldAppID":          "RT",
-		"fldTxnID":          "LGN",
-		"fldScrSeqNo":       "41",
-		"fldRequestorID":    "55",
-		"fldSessionID":      a.ssid,
-		"fldDeviceID":       "01",
-		"fldLangID":         "JPN",
-		"fldGridChallange1": a.getgrid(grid, values["fldGridChallange1"]),
-		"fldGridChallange2": a.getgrid(grid, values["fldGridChallange2"]),
-		"fldGridChallange3": a.getgrid(grid, values["fldGridChallange3"]),
-		"fldUserID":         "",
-		"fldUserNumId":      "",
-		"fldNumSeq":         "1",
-		"fldRegAuthFlag":    values["fldRegAuthFlag"],
+	r, err := a.post("login_auth_request_url", P{
+		"fldUserID":  id,
+		"password":   password,
+		"langCode":   "JAP",
+		"mode":       "1",
+		"postubFlag": "0",
 	})
 	if err != nil {
 		return err
 	}
 
-	err = a.ReloadTopPage()
+	var res authStatusResponse
+	err = json.Unmarshal([]byte(r), &res)
+	if err != nil {
+		return err
+	}
+	if res.AuthStatus != "success" {
+		return fmt.Errorf("invalid authStatus: %v", res.AuthStatus)
+	}
 
-	return err
+	a.csrfToken = res.Token
+	return a.GetAccountsBalanceAndActivity()
 }
 
 func (a *Account) Logout() error {
-	return nil
+	_, err := a.post("api/SFC/desktopbrowser/logout", P{
+		"realm":         "ShinseiAuthenticatorRealm",
+		"isAjaxRequest": "1",
+		"x":             "0",
+	})
+	return err
 }
 
 func (a *Account) TotalBalance() (int64, error) {
@@ -117,271 +118,276 @@ func (a *Account) LastLogin() (time.Time, error) {
 }
 
 func (a *Account) Recent() ([]*common.Transaction, error) {
-	return a.History(time.Time{}, time.Time{})
+	return a.recentTransaction, nil
 }
 
 func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 	fromStr := ""
-	toStr := "" // from.strftime("%Y%m%d") : ""
+	toStr := ""
+	typ := "0"
 	if !from.IsZero() {
-		toStr = fmt.Sprintf("%04d%02d%02d", from.Year(), from.Month(), from.Day())
+		fromStr = fmt.Sprintf("%04d%02d%02d", from.Year(), from.Month(), from.Day())
+		typ = "1"
 	}
 	if !to.IsZero() {
 		toStr = fmt.Sprintf("%04d%02d%02d", to.Year(), to.Month(), to.Day())
+		typ = "1"
 	}
-	values, err := a.execute(P{
-		"fldAppID":       "RT",
-		"fldTxnID":       "ACA",
-		"fldScrSeqNo":    "01",
-		"fldRequestorID": "9",
-		"fldSessionID":   a.ssid,
+	req := map[string]interface{}{
+		"requestParam": map[string]string{
+			"accountNo": a.mainAccountNo,
+			"type":      typ,
+			"fromDate":  fromStr,
+			"toDate":    toStr,
+		},
+	}
 
-		"fldAcctID":     a.currentAccount.Id,
-		"fldAcctType":   a.currentAccount.Type,
-		"fldIncludeBal": "N",
+	var activityRes struct {
+		Activity struct {
+			Response activityResponse `json:"responseParam"`
+		} `json:"activity"`
+	}
+	err := a.query("IFAI_AccountAdapter", "getCasaAccountActivitySpecificPeriod", req, &activityRes)
+	if err != nil {
+		return nil, err
+	}
 
-		"fldStartDate": fromStr,
-		"fldEndDate":   toStr,
-		"fldStartNum":  "0",
-		"fldEndNum":    "0",
-		"fldCurDef":    "JPY",
-		"fldPeriod":    "1",
-	})
-	trs := []*common.Transaction{}
-	for i := 0; i < 999; i++ {
-		suffix := fmt.Sprintf("[%d]", i)
-		date, ok := values["fldDate"+suffix]
-		if !ok {
-			break
-		}
-		var tr common.Transaction
-		if t, err := time.Parse("2006/01/02", date); err == nil {
-			tr.Date = t
-		}
-		tr.Description = values["fldDesc"+suffix]
-		tr.Amount, _ = strconv.ParseInt(values["fldAmount"+suffix], 10, 64)
-		tr.Balance, _ = strconv.ParseInt(values["fldRunningBalanceRaw"+suffix], 10, 64)
-		if values["fldDRCRFlag"+suffix] == "D" {
-			tr.Amount = -tr.Amount
-		}
-		if tr.Description != "Closing Balance" {
-			trs = append(trs, &tr)
-		}
+	var trs []*common.Transaction
+	for _, tr := range activityRes.Activity.Response.ActivityDetails {
+		date, _ := time.Parse("2006/01/02", tr.PostingDate)
+		credit, _ := strconv.ParseInt(tr.Credit, 10, 0)
+		debit, _ := strconv.ParseInt(tr.Debit, 10, 0)
+		trs = append(trs, &common.Transaction{
+			Date:        date,
+			Balance:     tr.Balance,
+			Description: tr.Description,
+			Amount:      credit - debit,
+		})
 	}
-	// reverse
-	for i, j := 0, len(trs)-1; i < j; i, j = i+1, j-1 {
-		trs[i], trs[j] = trs[j], trs[i]
-	}
+
 	return trs, err
 }
 
 // transfar api
 func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64) (common.TransferState, error) {
-	values, err := a.execute(P{
-		"fldAppID":       "RT",
-		"fldTxnID":       "ZNT",
-		"fldScrSeqNo":    "00",
-		"fldRequestorID": "71",
-		"fldSessionID":   a.ssid,
-	})
+	var res struct {
+		BeneficiaryList struct {
+			Response struct {
+				Details []map[string]string `json:"details"`
+			} `json:"responseParam"`
+		} `json:"beneficiaryListAPIParam"`
+	}
+	err := a.query("IFTR_TransferAdapter", "getTransferBeneficiaryList", nil, &res)
 	if err != nil {
 		return nil, err
 	}
 
-	type TargetAccount struct {
-		Id, Type, Name, Bank, BankKanji, BankKana, Branch, BranchKanji, BranchKana string
-	}
-	var registeredAccounts []*TargetAccount
-	for i := 0; i < 999; i++ {
-		n := fmt.Sprint(i)
-		if _, ok := values["fldListPayeeAcctId["+n+"]"]; !ok {
-			break
-		}
-		acc := &TargetAccount{
-			Id:          values["fldListPayeeAcctId["+n+"]"],
-			Type:        values["fldListPayeeAcctType["+n+"]"],
-			Name:        values["fldListPayeeName["+n+"]"],
-			Bank:        values["fldListPayeeBank["+n+"]"],
-			BankKanji:   values["fldListPayeeBankKanji["+n+"]"],
-			BankKana:    values["fldListPayeeBankKana["+n+"]"],
-			Branch:      values["fldListPayeeBranch["+n+"]"],
-			BranchKanji: values["fldListPayeeBranchKanji["+n+"]"],
-			BranchKana:  values["fldListPayeeBranchKana["+n+"]"],
-		}
-		registeredAccounts = append(registeredAccounts, acc)
-	}
-
-	var target *TargetAccount
-	for _, acc := range registeredAccounts {
-		log.Printf("%v\n", acc)
-		if acc.Id == targetName { // FIXME
-			target = acc
+	var target map[string]string
+	for _, detail := range res.BeneficiaryList.Response.Details {
+		if detail["beneficiaryAccountNo"] == targetName {
+			target = detail
 		}
 	}
-
 	if target == nil {
-		return nil, fmt.Errorf("not registered: %s in %v", targetName, registeredAccounts)
+		return nil, fmt.Errorf("not found")
 	}
-	limit, _ := strconv.ParseInt(values["fldDomFTLimit"], 10, 64)
-	if amount > limit {
-		return nil, fmt.Errorf("amount limited: %d > %d", amount, limit)
+
+	common.DebugLog("target: ", target)
+
+	req := map[string]interface{}{
+		"requestParam": map[string]interface{}{
+			"senderAccountNo":        a.mainAccountNo,
+			"branch":                 target["branchNameKana"],
+			"bank":                   target["bankNameKana"],
+			"beneficiaryName":        target["beneficiaryName"],
+			"beneficiaryAccountNo":   target["beneficiaryAccountNo"],
+			"beneficiaryAccountType": target["beneficiaryAccountType"],
+			"amount":                 amount,
+			"senderName":             target["beneficiaryName"], // TODO
+			"namebackFlag":           "Y",
+			"moretimeFlag":           "1",
+		},
 	}
-	memo := values["fldRemitterName"] // FIXME
-	// rem := fldRemReimburse
-
-	values, err = a.execute(P{
-		"fldAppID":       "RT",
-		"fldTxnID":       "ZNT",
-		"fldScrSeqNo":    "07",
-		"fldRequestorID": "74",
-		"fldSessionID":   a.ssid,
-
-		"fldAcctId":       a.currentAccount.Id,
-		"fldAcctType":     a.currentAccount.Type,
-		"fldAcctDesc":     a.currentAccount.Description,
-		"fldMemo":         memo,
-		"fldRemitterName": values["fldRemitterName"],
-		//"fldInvoice":"",
-		//"fldInvoicePosition":"B",
-		"fldTransferAmount": fmt.Sprint(amount),
-		"fldTransferType":   "P", // P(pre registerd) or D
-		//"fldPayeeId":"",
-		"fldPayeeName":     target.Name,
-		"fldPayeeAcctId":   target.Id,
-		"fldPayeeAcctType": target.Type,
-		//fldPayeeBankCode:undefined
-		"fldPayeeBankName":      target.Bank,
-		"fldPayeeBankNameKana":  target.BankKana,
-		"fldPayeeBankNameKanji": target.BankKanji,
-		//fldPayeeBranchCode:undefined
-		"fldPayeeBranchName":      target.Branch,
-		"fldPayeeBranchNameKana":  target.BranchKana,
-		"fldPayeeBranchNameKanji": target.BranchKanji,
-	})
+	var preconfirmRes struct {
+		Preconfirm struct {
+			Response map[string]string `json:"responseParam"`
+		} `json:"preconfirm"`
+	}
+	err = a.query("IFTR_TransferAdapter", "registerPreconfirmation", &req, &preconfirmRes)
 	if err != nil {
 		return nil, err
 	}
-	feemsg := values["fldTransferFee"] + " - " + values["fldReimbursedAmt"]
-	fee, _ := strconv.Atoi(values["fldTransferFee"])
-	return common.TransferStateMap{"values": values, "fee": fee, "fee_msg": feemsg, "amount": amount}, nil
+
+	preconfirm := preconfirmRes.Preconfirm.Response
+	amount, _ = strconv.ParseInt(preconfirm["amount"], 10, 0)
+	fee, _ := strconv.ParseInt(preconfirm["fee"], 10, 0)
+	return common.TransferStateMap{
+		"preconfirm": preconfirm,
+		"amount":     amount,
+		"fee":        fee,
+	}, nil
 }
 
 func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string, error) {
-	tr1 := tr.(common.TransferStateMap)
-	values := tr1["values"].(map[string]string)
-	params := P{
-		"fldAppID":       "RT",
-		"fldTxnID":       "ZNT",
-		"fldScrSeqNo":    "08",
-		"fldRequestorID": "76",
-		"fldSessionID":   a.ssid,
-	}
-	fields := []string{
-		"fldAcctId", "fldAcctType", "fldAcctDesc", "fldRemitterName",
-		"fldPayeeName", "fldPayeeAcctId", "fldPayeeAcctType",
-		"fldPayeeBankName", "fldPayeeBankNameKana", "fldPayeeBankNameKanji",
-		"fldPayeeBranchName", "fldPayeeBranchNameKana", "fldPayeeBranchNameKanji",
-		"fldTransferType", "fldReimbursedAmt", "fldRemReimburse",
-		"fldMemo", "fldInvoicePosition", "fldTransferType", "fldTransferDate",
-	}
-	params["fldTransferAmount"] = values["fldTransferAmountUnformatted"]
-	params["fldTransferFee"] = values["fldTransferFeeUnformatted"]
-	for _, f := range fields {
-		if v, ok := values[f]; ok {
-			params[f] = v
-		}
-	}
-	values, err := a.execute(params)
-	if err != nil {
-		return "", err
-	}
-	return values["fldHostRef"], nil
+	// TODO
+	return "", nil
 }
 
-func (a *Account) ReloadTopPage() error {
-	values, err := a.execute(P{
-		"fldAppID":       "RT",
-		"fldTxnID":       "ACS",
-		"fldScrSeqNo":    "00",
-		"fldRequestorID": "23",
-		"fldSessionID":   a.ssid,
-
-		"fldAcctID":     "", // 400????
-		"fldAcctType":   "CHECKING",
-		"fldIncludeBal": "Y",
-		"fldPeriod":     "",
-		"fldCurDef":     "JPY",
-	})
+func (a *Account) GetAccountsBalanceAndActivity() error {
+	var accountsRes struct {
+		Overview struct {
+			Response struct {
+				TotalCreditBalance int64 `json:"totalCreditBalance,string"`
+				TdBalance          int64 `json:"tdBalance,string"`
+				SavingsBalance     int64 `json:"savingsBalance,string"`
+			} `json:"responseParam"`
+		} `json:"overview"`
+		Activity struct {
+			Response activityResponse `json:"responseParam"`
+		} `json:"activity"`
+	}
+	err := a.query("IFTP_TopAdapter", "getAccountsBalanceAndActivity", nil, &accountsRes)
 	if err != nil {
 		return err
 	}
-	// log.Println(values)
-	a.balance, _ = strconv.ParseInt(strings.Replace(values["fldGrandTotalCR"], ",", "", -1), 10, 64)
 
-	accounts := map[string]*SubAccount{}
+	overview := accountsRes.Overview.Response
+	a.balance = overview.TotalCreditBalance
+	a.mainAccountNo = accountsRes.Activity.Response.AccountNo
 
-	re := regexp.MustCompile(`fldAccountID\[(\d+)\]`)
-	for k, v := range values {
-		if m := re.FindStringSubmatch(k); m != nil {
-			acc := &SubAccount{
-				Id:          v,
-				Type:        values["fldAccountType["+m[1]+"]"],
-				Curr:        values["fldCurrCcy["+m[1]+"]"],
-				Description: values["fldAccountDesc["+m[1]+"]"],
-			}
-			accounts[v] = acc
-			if m[1] == "0" {
-				a.currentAccount = acc
-			}
-		}
+	var trs []*common.Transaction
+	for _, tr := range accountsRes.Activity.Response.ActivityDetails {
+		date, _ := time.Parse("2006/01/02", tr.PostingDate)
+		credit, _ := strconv.ParseInt(tr.Credit, 10, 0)
+		debit, _ := strconv.ParseInt(tr.Debit, 10, 0)
+		trs = append(trs, &common.Transaction{
+			Date:        date,
+			Balance:     tr.Balance,
+			Description: tr.Description,
+			Amount:      credit - debit,
+		})
 	}
-	a.accounts = accounts
-
-	return err
+	// reverse
+	for i, j := 0, len(trs)-1; i < j; i, j = i+1, j-1 {
+		trs[i], trs[j] = trs[j], trs[i]
+	}
+	a.recentTransaction = trs
+	return nil
 }
 
-func (a *Account) execute(params P) (map[string]string, error) {
+func (a *Account) post(path string, params P) (string, error) {
 	values := url.Values{}
 	values.Set("MfcISAPICommand", "EntryFunc")
 	for k, v := range params {
 		values.Set(k, v)
 	}
-	// log.Println("execute ", params)
 
-	req, err := http.NewRequest("POST", baseUrl, strings.NewReader(values.Encode()))
+	req, err := http.NewRequest("POST", baseUrl+path, strings.NewReader(values.Encode()))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("WL-Instance-Id", a.instanceID)
+	req.Header.Set("X-CSRF-Token", a.csrfToken)
+	req.Header.Set("x-wl-app-version", "1.0")
+	req.Header.Set("x-wl-clientlog-appname", "SFC")
+	req.Header.Set("x-wl-clientlog-appversion", "1.0")
+	req.Header.Set("x-wl-clientlog-env", "desktopbrowser")
+	req.Header.Set("x-wl-clientlog-deviceId", "UNKNOWN")
+	req.Header.Set("x-wl-clientlog-model", "UNKNOWN")
+	req.Header.Set("x-wl-clientlog-osversion", "UNKNOWN")
 
 	res, err := a.client.Do(req)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer res.Body.Close()
 
 	b, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	// TODO check error fldErrorID!="0"
-	/*
-		<div id="main">
-			<p class="error">[message]</p>
-		</div>
-	*/
-	return a.parse(string(b)), err
+
+	return strings.TrimSuffix(strings.TrimPrefix(string(b), "/*-secure-"), "*/"), err
 }
 
-func (a *Account) getgrid(grid []string, pos string) string {
-	return string(grid[int(pos[1]-'0')][int(pos[0]-'A')])
+func (a *Account) init() error {
+	r, err := a.post("api/SFC/desktopbrowser/init", P{
+		"isAjaxRequest": "1",
+		"x":             "0",
+	})
+	if err != nil {
+		return err
+	}
+	var res struct {
+		Challenges struct {
+			Realm map[string]string `json:"wl_antiXSRFRealm"`
+		} `json:"challenges"`
+	}
+
+	err = json.Unmarshal([]byte(r), &res)
+	if err != nil {
+		return err
+	}
+	a.instanceID = res.Challenges.Realm["WL-Instance-Id"]
+
+	r, err = a.post("api/SFC/desktopbrowser/init", P{
+		"isAjaxRequest": "1",
+		"x":             "0",
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func (a *Account) parse(doc string) map[string]string {
-	values := map[string]string{}
-	re := regexp.MustCompile(`(fld[A-Z]\w*(\[\d+\])?)=['"]([^'"]+)['"]`)
-	for _, m := range re.FindAllStringSubmatch(doc, -1) {
-		values[m[1]] = m[3]
+func (a *Account) query(adapter, procedure string, req interface{}, res interface{}) error {
+	parametersStr := "[]"
+	if req != nil {
+		reqJSON, err := json.Marshal(req)
+		if err != nil {
+			return err
+		}
+		parametersJSON, _ := json.Marshal([]string{string(reqJSON)})
+		parametersStr = string(parametersJSON)
 	}
-	return values
+	params := P{
+		"adapter":    adapter,
+		"procedure":  procedure,
+		"parameters": parametersStr,
+	}
+	r, err := a.post("api/SFC/desktopbrowser/query", params)
+	common.DebugLog("params: ", params)
+	common.DebugLog("response:", r)
+	if err != nil {
+		return err
+	}
+
+	// get auth status.
+	if _, ok := res.(*authStatusResponse); ok {
+		return json.Unmarshal([]byte(r), res)
+	}
+
+	var result struct {
+		IsSuccessful bool                   `json:"isSuccessful"`
+		Response     json.RawMessage        `json:"responseParam"`
+		Headers      map[string]interface{} `json:"header"`
+	}
+	err = json.Unmarshal([]byte(r), &result)
+	if err != nil {
+		return err
+	}
+	if !result.IsSuccessful {
+		return fmt.Errorf("response.IsSuccessful=false")
+	}
+	if token, ok := result.Headers["newToken"].(string); ok {
+		a.csrfToken = token
+	}
+	if res != nil {
+		err = json.Unmarshal(result.Response, res)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

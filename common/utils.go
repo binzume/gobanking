@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"html"
 	"log"
+	"os"
 	"regexp"
 	"strings"
 
@@ -16,6 +17,14 @@ import (
 
 // UserAgent (must starts with Mozilla/...)
 const UserAgent = "Mozilla/5.0 NetBankingtClient/0.1"
+
+var Logger *log.Logger = log.New(os.Stderr, "", log.LstdFlags)
+
+func DebugLog(v ...interface{}) {
+	if Logger != nil {
+		Logger.Println(v...)
+	}
+}
 
 func GetMatched(htmlStr, reStr, def string) string {
 	re := regexp.MustCompile(reStr)
@@ -42,7 +51,9 @@ type AgentSetter struct{}
 
 func (t *AgentSetter) RoundTrip(req *http.Request) (*http.Response, error) {
 	req.Header.Set("User-Agent", UserAgent)
-	log.Println("REQUEST", req.Method, req.URL)
+	if Logger != nil {
+		Logger.Println("REQUEST", req.Method, req.URL)
+	}
 	return http.DefaultTransport.RoundTrip(req)
 }
 
