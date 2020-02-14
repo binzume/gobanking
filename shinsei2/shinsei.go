@@ -27,6 +27,24 @@ type Account struct {
 	recentTransaction []*common.Transaction
 }
 
+type activityResponse struct {
+	AccountNo       string `json:"accountNo"`
+	CurrentBalance  string `json:"currentBalance"`
+	ActivityDetails []*struct {
+		PostingDate    string `json:"postingDate"`
+		Balance        int64  `json:"balance,string"`
+		Description    string `json:"description"`
+		TxnReferenceNo string `json:"txnReferenceNo"`
+		Debit          string `json:"debit"`
+		Credit         string `json:"credit"`
+	} `json:"activityDetails"`
+}
+
+type authStatusResponse struct {
+	AuthStatus string `json:"authStatus"`
+	Token      string `json:"token"`
+}
+
 var _ common.Account = &Account{}
 
 const BankCode = "0397"
@@ -50,9 +68,7 @@ func (a *Account) Login(id, password string, loginParams interface{}) error {
 		return err
 	}
 
-	var securityConnectRes struct {
-		AuthStatus string `json:"authStatus"`
-	}
+	var securityConnectRes authStatusResponse
 	err = a.query("IFCM_CommonAdapter", "securityConnect", nil, &securityConnectRes)
 	if err != nil {
 		return err
@@ -72,10 +88,7 @@ func (a *Account) Login(id, password string, loginParams interface{}) error {
 		return err
 	}
 
-	var res struct {
-		AuthStatus string `json:"authStatus"`
-		Token      string `json:"token"`
-	}
+	var res authStatusResponse
 	err = json.Unmarshal([]byte(r), &res)
 	if err != nil {
 		return err
@@ -89,7 +102,12 @@ func (a *Account) Login(id, password string, loginParams interface{}) error {
 }
 
 func (a *Account) Logout() error {
-	return nil
+	_, err := a.post("api/SFC/desktopbrowser/logout", P{
+		"realm":         "ShinseiAuthenticatorRealm",
+		"isAjaxRequest": "1",
+		"x":             "0",
+	})
+	return err
 }
 
 func (a *Account) TotalBalance() (int64, error) {
@@ -107,47 +125,36 @@ func (a *Account) Recent() ([]*common.Transaction, error) {
 func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 	fromStr := ""
 	toStr := ""
+	typ := "0"
 	if !from.IsZero() {
-		toStr = fmt.Sprintf("%04d%02d%02d", from.Year(), from.Month(), from.Day())
+		fromStr = fmt.Sprintf("%04d%02d%02d", from.Year(), from.Month(), from.Day())
+		typ = "1"
 	}
 	if !to.IsZero() {
 		toStr = fmt.Sprintf("%04d%02d%02d", to.Year(), to.Month(), to.Day())
+		typ = "1"
 	}
 	req := map[string]interface{}{
 		"requestParam": map[string]string{
 			"accountNo": a.mainAccountNo,
-			"type":      "0",
+			"type":      typ,
 			"fromDate":  fromStr,
 			"toDate":    toStr,
 		},
 	}
+
 	var activityRes struct {
-		IsSuccessful bool `json:"isSuccessful"`
-		Response     struct {
-			Activity struct {
-				Response struct {
-					AccountNo       string `json:"accountNo"`
-					CurrentBalance  string `json:"currentBalance"`
-					ActivityDetails []*struct {
-						PostingDate    string `json:"postingDate"`
-						Balance        int64  `json:"balance,string"`
-						Description    string `json:"description"`
-						TxnReferenceNo string `json:"txnReferenceNo"`
-						Debit          string `json:"debit"`
-						Credit         string `json:"credit"`
-					} `json:"activityDetails"`
-				} `json:"responseParam"`
-			} `json:"activity"`
-		} `json:"responseParam"`
+		Activity struct {
+			Response activityResponse `json:"responseParam"`
+		} `json:"activity"`
 	}
 	err := a.query("IFAI_AccountAdapter", "getCasaAccountActivitySpecificPeriod", req, &activityRes)
 	if err != nil {
 		return nil, err
 	}
-	log.Print(activityRes)
 
 	var trs []*common.Transaction
-	for _, tr := range activityRes.Response.Activity.Response.ActivityDetails {
+	for _, tr := range activityRes.Activity.Response.ActivityDetails {
 		date, _ := time.Parse("2006/01/02", tr.PostingDate)
 		credit, _ := strconv.ParseInt(tr.Credit, 10, 0)
 		debit, _ := strconv.ParseInt(tr.Debit, 10, 0)
@@ -164,8 +171,62 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 
 // transfar api
 func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64) (common.TransferState, error) {
-	// TODO
-	return common.TransferStateMap{}, nil
+	var res struct {
+		BeneficiaryList struct {
+			Response struct {
+				Details []map[string]string `json:"details"`
+			} `json:"responseParam"`
+		} `json:"beneficiaryListAPIParam"`
+	}
+	err := a.query("IFTR_TransferAdapter", "getTransferBeneficiaryList", nil, &res)
+	if err != nil {
+		return nil, err
+	}
+
+	var target map[string]string
+	for _, detail := range res.BeneficiaryList.Response.Details {
+		if detail["beneficiaryAccountNo"] == targetName {
+			target = detail
+		}
+	}
+	if target == nil {
+		return nil, fmt.Errorf("not found")
+	}
+
+	log.Print("target: ", target)
+
+	req := map[string]interface{}{
+		"requestParam": map[string]interface{}{
+			"senderAccountNo":        a.mainAccountNo,
+			"branch":                 target["branchNameKana"],
+			"bank":                   target["bankNameKana"],
+			"beneficiaryName":        target["beneficiaryName"],
+			"beneficiaryAccountNo":   target["beneficiaryAccountNo"],
+			"beneficiaryAccountType": target["beneficiaryAccountType"],
+			"amount":                 amount,
+			"senderName":             target["beneficiaryName"], // TODO
+			"namebackFlag":           "Y",
+			"moretimeFlag":           "1",
+		},
+	}
+	var preconfirmRes struct {
+		Preconfirm struct {
+			Response map[string]string `json:"responseParam"`
+		} `json:"preconfirm"`
+	}
+	err = a.query("IFTR_TransferAdapter", "registerPreconfirmation", &req, &preconfirmRes)
+	if err != nil {
+		return nil, err
+	}
+
+	preconfirm := preconfirmRes.Preconfirm.Response
+	amount, _ = strconv.ParseInt(preconfirm["amount"], 10, 0)
+	fee, _ := strconv.ParseInt(preconfirm["fee"], 10, 0)
+	return common.TransferStateMap{
+		"preconfirm": preconfirm,
+		"amount":     amount,
+		"fee":        fee,
+	}, nil
 }
 
 func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string, error) {
@@ -174,45 +235,29 @@ func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string,
 }
 
 func (a *Account) GetAccountsBalanceAndActivity() error {
-
 	var accountsRes struct {
-		IsSuccessful bool `json:"isSuccessful"`
-		Response     struct {
-			Overview struct {
-				Response struct {
-					TotalCreditBalance int64 `json:"totalCreditBalance,string"`
-					TdBalance          int64 `json:"tdBalance,string"`
-					SavingsBalance     int64 `json:"savingsBalance,string"`
-				} `json:"responseParam"`
-			} `json:"overview"`
-			Activity struct {
-				Response struct {
-					AccountNo       string `json:"accountNo"`
-					CurrentBalance  string `json:"currentBalance"`
-					ActivityDetails []*struct {
-						PostingDate    string `json:"postingDate"`
-						Balance        int64  `json:"balance,string"`
-						Description    string `json:"description"`
-						TxnReferenceNo string `json:"txnReferenceNo"`
-						Debit          string `json:"debit"`
-						Credit         string `json:"credit"`
-					} `json:"activityDetails"`
-				} `json:"responseParam"`
-			} `json:"activity"`
-		} `json:"responseParam"`
+		Overview struct {
+			Response struct {
+				TotalCreditBalance int64 `json:"totalCreditBalance,string"`
+				TdBalance          int64 `json:"tdBalance,string"`
+				SavingsBalance     int64 `json:"savingsBalance,string"`
+			} `json:"responseParam"`
+		} `json:"overview"`
+		Activity struct {
+			Response activityResponse `json:"responseParam"`
+		} `json:"activity"`
 	}
 	err := a.query("IFTP_TopAdapter", "getAccountsBalanceAndActivity", nil, &accountsRes)
 	if err != nil {
 		return err
 	}
-	log.Print(accountsRes)
 
-	overview := accountsRes.Response.Overview.Response
+	overview := accountsRes.Overview.Response
 	a.balance = overview.TotalCreditBalance
-	a.mainAccountNo = accountsRes.Response.Activity.Response.AccountNo
+	a.mainAccountNo = accountsRes.Activity.Response.AccountNo
 
 	var trs []*common.Transaction
-	for _, tr := range accountsRes.Response.Activity.Response.ActivityDetails {
+	for _, tr := range accountsRes.Activity.Response.ActivityDetails {
 		date, _ := time.Parse("2006/01/02", tr.PostingDate)
 		credit, _ := strconv.ParseInt(tr.Credit, 10, 0)
 		debit, _ := strconv.ParseInt(tr.Debit, 10, 0)
@@ -222,6 +267,10 @@ func (a *Account) GetAccountsBalanceAndActivity() error {
 			Description: tr.Description,
 			Amount:      credit - debit,
 		})
+	}
+	// reverse
+	for i, j := 0, len(trs)-1; i < j; i, j = i+1, j-1 {
+		trs[i], trs[j] = trs[j], trs[i]
 	}
 	a.recentTransaction = trs
 	return nil
@@ -233,7 +282,6 @@ func (a *Account) post(path string, params P) (string, error) {
 	for k, v := range params {
 		values.Set(k, v)
 	}
-	// log.Println("post ", params)
 
 	req, err := http.NewRequest("POST", baseUrl+path, strings.NewReader(values.Encode()))
 	if err != nil {
@@ -265,7 +313,6 @@ func (a *Account) post(path string, params P) (string, error) {
 }
 
 func (a *Account) init() error {
-	// api/SFC/desktopbrowser/init
 	r, err := a.post("api/SFC/desktopbrowser/init", P{
 		"isAjaxRequest": "1",
 		"x":             "0",
@@ -295,27 +342,50 @@ func (a *Account) init() error {
 	return nil
 }
 
-func (a *Account) query(adapter, procedure string, parameters interface{}, res interface{}) error {
-	var parametersStr string
-	if parameters != nil {
-		jsonParam, err := json.Marshal(parameters)
+func (a *Account) query(adapter, procedure string, req interface{}, res interface{}) error {
+	parametersStr := "[]"
+	if req != nil {
+		reqJSON, err := json.Marshal(req)
 		if err != nil {
 			return err
 		}
-		parametersStr = string(jsonParam)
+		parametersJSON, _ := json.Marshal([]string{string(reqJSON)})
+		parametersStr = string(parametersJSON)
 	}
-	r, err := a.post("api/SFC/desktopbrowser/query", P{
-		"adapter":       adapter,
-		"procedure":     procedure,
-		"parameters":    "[" + parametersStr + "]",
-		"isAjaxRequest": "1",
-		"x":             "0",
-	})
+	params := P{
+		"adapter":    adapter,
+		"procedure":  procedure,
+		"parameters": parametersStr,
+	}
+	r, err := a.post("api/SFC/desktopbrowser/query", params)
+	// log.Println("params: ", params)
+	// log.Print("response:", r)
 	if err != nil {
 		return err
 	}
+
+	// get auth status.
+	if _, ok := res.(*authStatusResponse); ok {
+		return json.Unmarshal([]byte(r), res)
+	}
+
+	var result struct {
+		IsSuccessful bool                   `json:"isSuccessful"`
+		Response     json.RawMessage        `json:"responseParam"`
+		Headers      map[string]interface{} `json:"header"`
+	}
+	err = json.Unmarshal([]byte(r), &result)
+	if err != nil {
+		return err
+	}
+	if !result.IsSuccessful {
+		return fmt.Errorf("response.IsSuccessful=false")
+	}
+	if token, ok := result.Headers["newToken"].(string); ok {
+		a.csrfToken = token
+	}
 	if res != nil {
-		err = json.Unmarshal([]byte(r), res)
+		err = json.Unmarshal(result.Response, res)
 		if err != nil {
 			return err
 		}
