@@ -93,6 +93,9 @@ func (a *Account) Login(id, password string, loginparams interface{}) error {
 	if err != nil {
 		return err
 	}
+	if a.sequence < 2 {
+		return errors.New("login error")
+	}
 
 	a.balance, _ = getMatchedInt(res, `(?s)総額（評価額）.*?>\s*([0-9,]+)\s*<`)
 	// a.balance, _ = getMatchedInt(res, `(?s)（支払可能残高）.*?>\s*([0-9,]+)\s*<`)
