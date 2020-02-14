@@ -71,19 +71,20 @@ func (a *Account) Login(id, password string, loginParams interface{}) error {
 	if err != nil {
 		return err
 	}
-	log.Print(r)
 
 	var res struct {
-		Status string `json:"authStatus"`
-		Token  string `json:"token"`
+		AuthStatus string `json:"authStatus"`
+		Token      string `json:"token"`
 	}
 	err = json.Unmarshal([]byte(r), &res)
 	if err != nil {
 		return err
 	}
-	log.Print(res)
-	a.csrfToken = res.Token
+	if res.AuthStatus != "success" {
+		return fmt.Errorf("invalid authStatus: %v", res.AuthStatus)
+	}
 
+	a.csrfToken = res.Token
 	return a.GetAccountsBalanceAndActivity()
 }
 
@@ -145,7 +146,18 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 	}
 	log.Print(activityRes)
 
-	trs := []*common.Transaction{}
+	var trs []*common.Transaction
+	for _, tr := range activityRes.Response.Activity.Response.ActivityDetails {
+		date, _ := time.Parse("2006/01/02", tr.PostingDate)
+		credit, _ := strconv.ParseInt(tr.Credit, 10, 0)
+		debit, _ := strconv.ParseInt(tr.Debit, 10, 0)
+		trs = append(trs, &common.Transaction{
+			Date:        date,
+			Balance:     tr.Balance,
+			Description: tr.Description,
+			Amount:      credit - debit,
+		})
+	}
 
 	return trs, err
 }
@@ -170,6 +182,7 @@ func (a *Account) GetAccountsBalanceAndActivity() error {
 				Response struct {
 					TotalCreditBalance int64 `json:"totalCreditBalance,string"`
 					TdBalance          int64 `json:"tdBalance,string"`
+					SavingsBalance     int64 `json:"savingsBalance,string"`
 				} `json:"responseParam"`
 			} `json:"overview"`
 			Activity struct {
@@ -195,22 +208,22 @@ func (a *Account) GetAccountsBalanceAndActivity() error {
 	log.Print(accountsRes)
 
 	overview := accountsRes.Response.Overview.Response
-	a.balance = overview.TotalCreditBalance + overview.TdBalance
+	a.balance = overview.TotalCreditBalance
 	a.mainAccountNo = accountsRes.Response.Activity.Response.AccountNo
 
-	var recent []*common.Transaction
+	var trs []*common.Transaction
 	for _, tr := range accountsRes.Response.Activity.Response.ActivityDetails {
 		date, _ := time.Parse("2006/01/02", tr.PostingDate)
 		credit, _ := strconv.ParseInt(tr.Credit, 10, 0)
 		debit, _ := strconv.ParseInt(tr.Debit, 10, 0)
-		recent = append(recent, &common.Transaction{
+		trs = append(trs, &common.Transaction{
 			Date:        date,
 			Balance:     tr.Balance,
 			Description: tr.Description,
 			Amount:      credit - debit,
 		})
 	}
-	a.recentTransaction = recent
+	a.recentTransaction = trs
 	return nil
 }
 
@@ -220,7 +233,7 @@ func (a *Account) post(path string, params P) (string, error) {
 	for k, v := range params {
 		values.Set(k, v)
 	}
-	log.Println("post ", params)
+	// log.Println("post ", params)
 
 	req, err := http.NewRequest("POST", baseUrl+path, strings.NewReader(values.Encode()))
 	if err != nil {
@@ -270,7 +283,6 @@ func (a *Account) init() error {
 	if err != nil {
 		return err
 	}
-	log.Print(res)
 	a.instanceID = res.Challenges.Realm["WL-Instance-Id"]
 
 	r, err = a.post("api/SFC/desktopbrowser/init", P{
@@ -280,7 +292,6 @@ func (a *Account) init() error {
 	if err != nil {
 		return err
 	}
-	log.Print(r)
 	return nil
 }
 
@@ -303,7 +314,6 @@ func (a *Account) query(adapter, procedure string, parameters interface{}, res i
 	if err != nil {
 		return err
 	}
-	log.Print(r)
 	if res != nil {
 		err = json.Unmarshal([]byte(r), res)
 		if err != nil {
