@@ -1,6 +1,7 @@
 package shinsei
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 
@@ -24,6 +25,8 @@ type Account struct {
 	balance           int64
 	lastLogin         time.Time
 	recentTransaction []*common.Transaction
+
+	secureGrid []string
 }
 
 type activityResponse struct {
@@ -51,13 +54,21 @@ const baseUrl = "https://bk.shinseibank.com/SFC/apps/services/"
 
 type P map[string]string
 
-func Login(id, password string) (*Account, error) {
+func Login(id, password string, options map[string]interface{}) (*Account, error) {
 	client, err := common.NewHttpClient()
 	if err != nil {
 		return nil, err
 	}
 	a := &Account{client: client}
-	err = a.Login(id, password, nil)
+	if grid, ok := options["grid"].([]string); ok {
+		a.secureGrid = grid
+	}
+	if grid, ok := options["grid"].([]interface{}); ok {
+		for _, f := range grid {
+			a.secureGrid = append(a.secureGrid, f.(string))
+		}
+	}
+	err = a.Login(id, password, options)
 	return a, err
 }
 
@@ -88,7 +99,7 @@ func (a *Account) Login(id, password string, loginParams interface{}) error {
 	}
 
 	var res authStatusResponse
-	err = json.Unmarshal([]byte(r), &res)
+	err = json.Unmarshal(r, &res)
 	if err != nil {
 		return err
 	}
@@ -203,7 +214,7 @@ func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64
 			"beneficiaryAccountNo":   target["beneficiaryAccountNo"],
 			"beneficiaryAccountType": target["beneficiaryAccountType"],
 			"amount":                 amount,
-			"senderName":             target["beneficiaryName"], // TODO
+			"senderName":             target["beneficiaryName"], // FIXME
 			"namebackFlag":           "Y",
 			"moretimeFlag":           "1",
 		},
@@ -218,19 +229,83 @@ func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64
 		return nil, err
 	}
 
+	var gridRes struct {
+		Result struct {
+			Response map[string]string `json:"responseParam"`
+		} `json:"gridChallengeApiResponse"`
+	}
+	err = a.query("IFCM_CommonAdapter", "getCallengeGridPosition", nil, &gridRes)
+	if err != nil {
+		return nil, err
+	}
+
 	preconfirm := preconfirmRes.Preconfirm.Response
 	amount, _ = strconv.ParseInt(preconfirm["amount"], 10, 0)
 	fee, _ := strconv.ParseInt(preconfirm["fee"], 10, 0)
 	return common.TransferStateMap{
+		"target":     target,
+		"request":    req["requestParam"],
 		"preconfirm": preconfirm,
+		"grid":       gridRes.Result.Response,
 		"amount":     amount,
 		"fee":        fee,
 	}, nil
 }
 
 func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string, error) {
-	// TODO
-	return "", nil
+
+	if a.secureGrid == nil {
+		return "", fmt.Errorf("empty secure grid")
+	}
+
+	trmap := tr.(common.TransferStateMap)
+	target := trmap["target"].(map[string]string)
+	preconfirm := trmap["preconfirm"].(map[string]string)
+	transfarReq := trmap["request"].(map[string]interface{})
+	gridChallenge := trmap["grid"].(map[string]string)
+	req := map[string]interface{}{
+		"requestParam": map[string]interface{}{
+			"beneficiaryAdd":         1,
+			"senderName":             transfarReq["senderName"],
+			"senderAccountNo":        transfarReq["senderAccountNo"],
+			"beneficiaryName":        target["beneficiaryName"],
+			"beneficiaryAccountNo":   target["beneficiaryAccountNo"],
+			"beneficiaryAccountType": target["beneficiaryAccountType"],
+			"bank":            target["bankNameKana"],
+			"bankNameKanji":   target["bankNameKanji"],
+			"bankCode":        target["bankCode"],
+			"branch":          target["branchNameKana"],
+			"branchNameKanji": target["branchNameKanji"],
+			"branchCode":      target["branchCode"],
+
+			"amount":                    preconfirm["amount"],
+			"totalAmount":               preconfirm["totalAmount"],
+			"fee":                       preconfirm["fee"],
+			"valueDate":                 preconfirm["transactionDate"], // TODO
+			"deleteBeneficiaryName":     "",
+			"sessionRegistTime":         time.Now().UnixNano() / int64(time.Millisecond), // TODO
+			"namebackFlag":              transfarReq["namebackFlag"],
+			"moretimeFlag":              transfarReq["moretimeFlag"],
+			"authenticationStatus":      "G",
+			"userAgentInfo":             "test",
+			"registeredBeneficiaryFlag": "Y",
+			"pin": pass2,
+			"gridChallengeValue1": a.getgrid(gridChallenge["challenge1"]),
+			"gridChallengeValue2": a.getgrid(gridChallenge["challenge2"]),
+			"gridChallengeValue3": a.getgrid(gridChallenge["challenge3"]),
+		},
+	}
+	var confirmRes struct {
+		Response struct {
+			Param map[string]string `json:"responseParam"`
+		} `json:"confirmApiResponse"`
+	}
+	err := a.query("IFTR_TransferAdapter", "registerConfirmation", &req, &confirmRes)
+	if err != nil {
+		return "", err
+	}
+
+	return confirmRes.Response.Param["txnReferenceNo"], nil
 }
 
 func (a *Account) GetAccountsBalanceAndActivity() error {
@@ -275,16 +350,19 @@ func (a *Account) GetAccountsBalanceAndActivity() error {
 	return nil
 }
 
-func (a *Account) post(path string, params P) (string, error) {
+func (a *Account) getgrid(pos string) string {
+	return string(a.secureGrid[int(pos[1]-'0')][int(pos[0]-'A')])
+}
+
+func (a *Account) post(path string, params P) ([]byte, error) {
 	values := url.Values{}
-	values.Set("MfcISAPICommand", "EntryFunc")
 	for k, v := range params {
 		values.Set(k, v)
 	}
 
 	req, err := http.NewRequest("POST", baseUrl+path, strings.NewReader(values.Encode()))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("WL-Instance-Id", a.instanceID)
@@ -299,16 +377,12 @@ func (a *Account) post(path string, params P) (string, error) {
 
 	res, err := a.client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer res.Body.Close()
 
 	b, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return "", err
-	}
-
-	return strings.TrimSuffix(strings.TrimPrefix(string(b), "/*-secure-"), "*/"), err
+	return bytes.TrimSuffix(bytes.TrimPrefix(b, []byte("/*-secure-")), []byte("*/")), err
 }
 
 func (a *Account) init() error {
@@ -325,19 +399,11 @@ func (a *Account) init() error {
 		} `json:"challenges"`
 	}
 
-	err = json.Unmarshal([]byte(r), &res)
+	err = json.Unmarshal(r, &res)
 	if err != nil {
 		return err
 	}
 	a.instanceID = res.Challenges.Realm["WL-Instance-Id"]
-
-	r, err = a.post("api/SFC/desktopbrowser/init", P{
-		"isAjaxRequest": "1",
-		"x":             "0",
-	})
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -358,27 +424,37 @@ func (a *Account) query(adapter, procedure string, req interface{}, res interfac
 	}
 	r, err := a.post("api/SFC/desktopbrowser/query", params)
 	common.DebugLog("params: ", params)
-	common.DebugLog("response:", r)
+	common.DebugLog("response:", string(r))
 	if err != nil {
 		return err
 	}
 
 	// get auth status.
 	if _, ok := res.(*authStatusResponse); ok {
-		return json.Unmarshal([]byte(r), res)
+		return json.Unmarshal(r, res)
 	}
 
 	var result struct {
 		IsSuccessful bool                   `json:"isSuccessful"`
 		Response     json.RawMessage        `json:"responseParam"`
 		Headers      map[string]interface{} `json:"header"`
+		AuthInfo     map[string]interface{} `json:"WL-Authentication-Success,omitempty"`
 	}
-	err = json.Unmarshal([]byte(r), &result)
+	err = json.Unmarshal(r, &result)
 	if err != nil {
 		return err
 	}
 	if !result.IsSuccessful {
 		return fmt.Errorf("response.IsSuccessful=false")
+	}
+	if result.AuthInfo != nil {
+		if realm, ok := result.AuthInfo["ShinseiAuthenticatorRealm"].(map[string]interface{}); ok {
+			if attributes, ok := realm["attributes"].(map[string]interface{}); ok {
+				if lastLoginTime, ok := attributes["lastLoginTime"].(string); ok {
+					a.lastLogin, _ = time.Parse("2006/01/02 15:04:05", lastLoginTime)
+				}
+			}
+		}
 	}
 	if token, ok := result.Headers["newToken"].(string); ok {
 		a.csrfToken = token

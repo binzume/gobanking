@@ -49,7 +49,7 @@ func Login(c *AccountConfig) (common.Account, error) {
 		}
 		return rakuten.Login(c.Id, c.Password, words)
 	case "shinsei":
-		return shinsei.Login(c.Id, c.Password)
+		return shinsei.Login(c.Id, c.Password, c.Options)
 	case "sbi":
 		return sbi.Login(c.Id, c.Password)
 	case "stub":
