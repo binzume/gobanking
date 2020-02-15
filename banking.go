@@ -37,21 +37,13 @@ func LoginWithJsonFile(path string) (common.Account, error) {
 func Login(c *AccountConfig) (common.Account, error) {
 	switch c.Bank {
 	case "mizuho":
-		words := map[string]string{}
-		for k, v := range c.Options {
-			words[k] = v.(string)
-		}
-		return mizuho.Login(c.Id, c.Password, words)
+		return mizuho.Login(c.Id, c.Password, c.Options)
 	case "rakuten":
-		words := map[string]string{}
-		for k, v := range c.Options {
-			words[k] = v.(string)
-		}
-		return rakuten.Login(c.Id, c.Password, words)
+		return rakuten.Login(c.Id, c.Password, c.Options)
 	case "shinsei":
 		return shinsei.Login(c.Id, c.Password, c.Options)
 	case "sbi":
-		return sbi.Login(c.Id, c.Password)
+		return sbi.Login(c.Id, c.Password, c.Options)
 	case "stub":
 		return stub.Login(c.Id, c.Password, c.Options)
 	default:

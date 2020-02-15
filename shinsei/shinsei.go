@@ -60,6 +60,11 @@ func Login(id, password string, options map[string]interface{}) (*Account, error
 		return nil, err
 	}
 	a := &Account{client: client}
+	err = a.Login(id, password, options)
+	return a, err
+}
+
+func (a *Account) Login(id, password string, options map[string]interface{}) error {
 	if grid, ok := options["grid"].([]string); ok {
 		a.secureGrid = grid
 	}
@@ -68,11 +73,7 @@ func Login(id, password string, options map[string]interface{}) (*Account, error
 			a.secureGrid = append(a.secureGrid, f.(string))
 		}
 	}
-	err = a.Login(id, password, options)
-	return a, err
-}
 
-func (a *Account) Login(id, password string, loginParams interface{}) error {
 	err := a.init()
 	if err != nil {
 		return err

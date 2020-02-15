@@ -19,17 +19,17 @@ var _ common.Account = &Account{}
 
 func Login(id, password string, options map[string]interface{}) (*Account, error) {
 	a := &Account{
-		common.BankAccount{BankCode: BankCode, BankName: BankName, BranchCode: "001", BranchName: "テスト支店", OwnerName: id},
-		options,
+		BankAccount: common.BankAccount{BankCode: BankCode, BankName: BankName, BranchCode: "001", BranchName: "テスト支店", OwnerName: id},
 	}
-	err := a.Login(id, password, nil)
+	err := a.Login(id, password, options)
 	return a, err
 }
 
-func (a *Account) Login(id, password string, params interface{}) error {
+func (a *Account) Login(id, password string, options map[string]interface{}) error {
 	if id == "" || password == "" {
 		return errors.New("login error")
 	}
+	a.options = options
 	return nil
 }
 

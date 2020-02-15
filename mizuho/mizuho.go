@@ -40,13 +40,13 @@ const BankName = "みずほ銀行"
 const MizuhoUrl = "https://web1.ib.mizuhobank.co.jp/servlet/"
 const DummyFingerPrint = "version%3D3%2E2%2E0%2E0%5F3%26pm%5Ffpua%3Dmozilla"
 
-func Login(id, password string, qa map[string]string) (*Account, error) {
+func Login(id, password string, options map[string]interface{}) (*Account, error) {
 	client, err := common.NewHttpClient()
 	if err != nil {
 		return nil, err
 	}
 	a := &Account{client: client, baseUrl: MizuhoUrl}
-	err = a.Login(id, password, qa)
+	err = a.Login(id, password, options)
 	return a, err
 }
 
@@ -55,7 +55,7 @@ func (a *Account) Logout() error {
 	return err
 }
 
-func (a *Account) Login(id, password string, params interface{}) error {
+func (a *Account) Login(id, password string, options map[string]interface{}) error {
 	_, err := a.fetch("LOGBNK0000000B")
 	if err != nil {
 		return err
@@ -69,7 +69,10 @@ func (a *Account) Login(id, password string, params interface{}) error {
 	}
 
 	// aikotoba
-	qa := params.(map[string]string)
+	qa := map[string]string{}
+	for k, v := range options {
+		qa[k] = v.(string)
+	}
 	html, err = a.sendAikotoba(html, qa)
 	if err != nil {
 		return err

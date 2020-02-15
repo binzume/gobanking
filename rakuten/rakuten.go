@@ -35,18 +35,21 @@ const BankCode = "0036"
 const BankName = "楽天銀行"
 const baseurl = "https://fes.rakuten-bank.co.jp/MS/main/"
 
-func Login(id, password string, params interface{}) (*Account, error) {
+func Login(id, password string, options map[string]interface{}) (*Account, error) {
 	client, err := common.NewHttpClient()
 	if err != nil {
 		return nil, err
 	}
 	a := &Account{client: client}
-	err = a.Login(id, password, params)
+	err = a.Login(id, password, options)
 	return a, err
 }
 
-func (a *Account) Login(id, password string, loginparams interface{}) error {
-	qa, _ := loginparams.(map[string]string)
+func (a *Account) Login(id, password string, options map[string]interface{}) error {
+	qa := map[string]string{}
+	for k, v := range options {
+		qa[k] = v.(string)
+	}
 	_, err := a.get("RbS?CurrentPageID=START&COMMAND=LOGIN")
 	if err != nil {
 		return err

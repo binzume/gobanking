@@ -29,17 +29,17 @@ type P map[string]string
 
 var _ common.Account = &Account{}
 
-func Login(id, password string) (*Account, error) {
+func Login(id, password string, options map[string]interface{}) (*Account, error) {
 	client, err := common.NewHttpClient()
 	if err != nil {
 		return nil, err
 	}
 	a := &Account{client: client}
-	err = a.Login(id, password, nil)
+	err = a.Login(id, password, options)
 	return a, err
 }
 
-func (a *Account) Login(id, password string, loginParams interface{}) error {
+func (a *Account) Login(id, password string, options map[string]interface{}) error {
 	_, err := a.post("i010101CT", P{
 		"userName":    id,
 		"loginPwdSet": password,
