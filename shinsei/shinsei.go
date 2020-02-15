@@ -23,8 +23,11 @@ type Account struct {
 	mainAccountNo string
 
 	balance           int64
+	fundBalance       int64
 	lastLogin         time.Time
 	recentTransaction []*common.Transaction
+
+	customerNameKana string
 
 	secureGrid []string
 }
@@ -107,8 +110,8 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 	if res.AuthStatus != "success" {
 		return fmt.Errorf("invalid authStatus: %v", res.AuthStatus)
 	}
-
 	a.csrfToken = res.Token
+
 	return a.GetAccountsBalanceAndActivity()
 }
 
@@ -122,7 +125,7 @@ func (a *Account) Logout() error {
 }
 
 func (a *Account) TotalBalance() (int64, error) {
-	return a.balance, nil
+	return a.balance + a.fundBalance, nil
 }
 
 func (a *Account) LastLogin() (time.Time, error) {
@@ -209,13 +212,13 @@ func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64
 	req := map[string]interface{}{
 		"requestParam": map[string]interface{}{
 			"senderAccountNo":        a.mainAccountNo,
+			"senderName":             a.customerNameKana,
 			"branch":                 target["branchNameKana"],
 			"bank":                   target["bankNameKana"],
 			"beneficiaryName":        target["beneficiaryName"],
 			"beneficiaryAccountNo":   target["beneficiaryAccountNo"],
 			"beneficiaryAccountType": target["beneficiaryAccountType"],
 			"amount":                 amount,
-			"senderName":             target["beneficiaryName"], // FIXME
 			"namebackFlag":           "Y",
 			"moretimeFlag":           "1",
 		},
@@ -310,25 +313,44 @@ func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string,
 }
 
 func (a *Account) GetAccountsBalanceAndActivity() error {
-	var accountsRes struct {
-		Overview struct {
-			Response struct {
-				TotalCreditBalance int64 `json:"totalCreditBalance,string"`
-				TdBalance          int64 `json:"tdBalance,string"`
-				SavingsBalance     int64 `json:"savingsBalance,string"`
+	var summaryRes struct {
+		Summary struct {
+			Param struct {
+				FxCasaBalance  int64 `json:"fxCasaBalance,string"`
+				SavingsBalance int64 `json:"savingsBalance,string"`
+				YenTDBalance   int64 `json:"yenTDBalance,string"`
+				TotalCredit    int64 `json:"totalCredit,string"`
+
+				CustomerName      string `json:"customerName"`
+				CustomerNameKana  string `json:"customerNameKana"`
+				CustomerNameKanji string `json:"customerNameKanji"`
 			} `json:"responseParam"`
-		} `json:"overview"`
-		Activity struct {
-			Response activityResponse `json:"responseParam"`
-		} `json:"activity"`
+		} `json:"summary"`
+		FundBalance struct {
+			Param struct {
+				YenEqui int64 `json:"yenEqui,string"`
+			} `json:"responseParam"`
+		} `json:"mutualFundBalance"`
 	}
-	err := a.query("IFTP_TopAdapter", "getAccountsBalanceAndActivity", nil, &accountsRes)
+	err := a.query("IFTP_TopAdapter", "getBalanceSummaryAndStage", nil, &summaryRes)
 	if err != nil {
 		return err
 	}
 
-	overview := accountsRes.Overview.Response
-	a.balance = overview.TotalCreditBalance
+	a.balance = summaryRes.Summary.Param.TotalCredit
+	a.fundBalance = summaryRes.FundBalance.Param.YenEqui
+	a.customerNameKana = summaryRes.Summary.Param.CustomerNameKana
+
+	var accountsRes struct {
+		Activity struct {
+			Response activityResponse `json:"responseParam"`
+		} `json:"activity"`
+	}
+	err = a.query("IFTP_TopAdapter", "getAccountsBalanceAndActivity", nil, &accountsRes)
+	if err != nil {
+		return err
+	}
+
 	a.mainAccountNo = accountsRes.Activity.Response.AccountNo
 
 	var trs []*common.Transaction

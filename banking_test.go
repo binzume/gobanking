@@ -20,6 +20,8 @@ func TestAccount(t *testing.T) {
 	var _ common.Account = &shinsei.Account{}
 	var _ common.Account = &stub.Account{}
 
+	common.Debug = true
+
 	acc, err := LoginWithJsonFile("examples/accounts/stub.json")
 	if err != nil {
 		t.Errorf("login failed %v", err)

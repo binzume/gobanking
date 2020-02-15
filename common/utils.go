@@ -19,9 +19,10 @@ import (
 const UserAgent = "Mozilla/5.0 NetBankingtClient/0.1"
 
 var Logger *log.Logger = log.New(os.Stderr, "", log.LstdFlags)
+var Debug = false
 
 func DebugLog(v ...interface{}) {
-	if Logger != nil {
+	if Debug && Logger != nil {
 		Logger.Println(v...)
 	}
 }
