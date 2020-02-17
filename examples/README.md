@@ -43,7 +43,7 @@ go run account_info.go accounts/rakuten.json
   "bank": "shinsei",
   "id":"4001234567",
   "password": "PASSWORD",
-  "options": {"numId":"1234", "grid":["ABCDEF1234", "ABCDEF1234", "ABCDEF1234", "ABCDEF1234", "ABCDEF1234"]}
+  "options": {"grid":["ABCDEF1234", "ABCDEF1234", "ABCDEF1234", "ABCDEF1234", "ABCDEF1234"]}
 }
 ```
 

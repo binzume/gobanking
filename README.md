@@ -58,7 +58,7 @@ func main() {
 import "github.com/binzume/gobanking/mizuho"
 
 func main() {
-	words := map[string]string{
+	words := map[string]interface{}{
 		"質問の部分文字列": "答え",
 	}
 	acc, err := mizuho.Login("1234567890", "password", words)
@@ -78,21 +78,20 @@ func main() {
 
 ### 取引履歴
 
-直近の数件を返すものと，期間指定で取得する関数があります．件数や指定可能な期間は銀行によって異なります．
+直近の数件を返すものと，期間指定で取得する関数があります．取得可能な件数や期間は銀行によって異なります．
 
 ```golang
 	recent, err := acc.Recent()
 	history, err := History(time.Now().Add(-time.Hour*24*30), time.Now())
 ```
 
-- みずほで取得可能な履歴は過去3ヶ月
-- 楽天銀行は24ヶ月，3000件まで
+- みずほ：取得可能な履歴は過去3ヶ月
+- 楽天銀行：24ヶ月，3000件まで
 - Recent() は日時の古いものがスライスの先頭です
 
 ### 送金
 
-登録済みの口座に対してのみ振り込めます．
- 一応動きますが，インターフェイスとか色々整理中です．
+振込先として登録済みの口座に対してのみ振り込めます．
 
 `NewTransferToRegisteredAccount()` で登録済みの口座への振込情報を作成し，`CommitTransfer()` で確定．
 
@@ -108,7 +107,7 @@ func main() {
 	log.Println(recptNo, err)
 ```
 
-- 新生銀行は 振込先名のところに口座番号． 暗証番号は空．
+- 新生銀行は 振込先名のところに口座番号．他の銀行は振込先として登録した名前を指定してください．
 
 ## TODO
 
