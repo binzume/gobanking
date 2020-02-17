@@ -7,6 +7,7 @@ import (
 type Account interface {
 	Login(id, password string, options map[string]interface{}) error // Internal use only. see: bankpkg.Login(...)
 	Logout() error
+	AccountInfo() *BankAccount
 	TotalBalance() (int64, error)
 	LastLogin() (time.Time, error)
 	Recent() ([]*Transaction, error)

@@ -16,6 +16,8 @@ import (
 )
 
 type Account struct {
+	common.BankAccount
+
 	client *http.Client
 
 	instanceID    string
@@ -53,6 +55,7 @@ type authStatusResponse struct {
 var _ common.Account = &Account{}
 
 const BankCode = "0397"
+const BankName = "新生銀行"
 const baseUrl = "https://bk.shinseibank.com/SFC/apps/services/"
 
 type P map[string]string
@@ -112,6 +115,8 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 	}
 	a.csrfToken = res.Token
 
+	a.BranchCode = id[0:3]
+	a.AccountNum = id[3:]
 	return a.GetAccountsBalanceAndActivity()
 }
 
@@ -122,6 +127,10 @@ func (a *Account) Logout() error {
 		"x":             "0",
 	})
 	return err
+}
+
+func (a *Account) AccountInfo() *common.BankAccount {
+	return &a.BankAccount
 }
 
 func (a *Account) TotalBalance() (int64, error) {
@@ -331,6 +340,12 @@ func (a *Account) GetAccountsBalanceAndActivity() error {
 				YenEqui int64 `json:"yenEqui,string"`
 			} `json:"responseParam"`
 		} `json:"mutualFundBalance"`
+		Branch struct {
+			Param struct {
+				BranchName string `json:"branchName"`
+				BranchCode string `json:"branchCode"`
+			} `json:"responseParam"`
+		} `json:"branchFetch"`
 	}
 	err := a.query("IFTP_TopAdapter", "getBalanceSummaryAndStage", nil, &summaryRes)
 	if err != nil {
@@ -340,6 +355,11 @@ func (a *Account) GetAccountsBalanceAndActivity() error {
 	a.balance = summaryRes.Summary.Param.TotalCredit
 	a.fundBalance = summaryRes.FundBalance.Param.YenEqui
 	a.customerNameKana = summaryRes.Summary.Param.CustomerNameKana
+
+	a.BankCode = BankCode
+	a.BankName = BankName
+	a.BranchName = summaryRes.Branch.Param.BranchName
+	a.OwnerName = summaryRes.Summary.Param.CustomerName
 
 	var accountsRes struct {
 		Activity struct {

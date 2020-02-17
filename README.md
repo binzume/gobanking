@@ -2,6 +2,7 @@
 
 [![Build Status](https://travis-ci.org/binzume/gobanking.svg)](https://travis-ci.org/binzume/gobanking)
 [![codecov](https://codecov.io/gh/binzume/gobanking/branch/master/graph/badge.svg)](https://codecov.io/gh/binzume/gobanking)
+[![GoDoc](https://godoc.org/github.com/binzume/gobanking?status.svg)](https://godoc.org/github.com/binzume/gobanking)
 
 Golangで銀行のサイトをスクレイピングして操作するためのライブラリです．
 昔Rubyで書いたものをGolangに移植したもの．

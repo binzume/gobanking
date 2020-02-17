@@ -91,6 +91,10 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 	return a.parseTopPage(html)
 }
 
+func (a *Account) AccountInfo() *common.BankAccount {
+	return &a.BankAccount
+}
+
 func (a *Account) TotalBalance() (int64, error) {
 	return a.balance, nil
 }

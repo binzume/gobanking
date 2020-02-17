@@ -27,13 +27,19 @@ func TestAccount(t *testing.T) {
 		t.Errorf("login failed %v", err)
 	}
 
+	t.Log("Account Info: ", acc.AccountInfo())
+
+	lastLogin, err := acc.LastLogin()
+	if err != nil {
+		t.Errorf("failed to get last login: %v", err)
+	}
+	t.Log("Last login:", lastLogin)
+
 	balance, err := acc.TotalBalance()
 	if err != nil {
 		t.Errorf("failed to get balabce: %v", err)
 	}
 	t.Log("Balance:", balance)
-
-	t.Log(acc.LastLogin())
 
 	t.Log("Recent: ")
 	trs, err := acc.Recent()

@@ -37,6 +37,10 @@ func (a *Account) Logout() error {
 	return nil
 }
 
+func (a *Account) AccountInfo() *common.BankAccount {
+	return &a.BankAccount
+}
+
 func (a *Account) TotalBalance() (int64, error) {
 	return a.getInt("balance", 1234567), nil
 }

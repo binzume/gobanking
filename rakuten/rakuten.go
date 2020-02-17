@@ -122,6 +122,10 @@ func (a *Account) Logout() error {
 	return err
 }
 
+func (a *Account) AccountInfo() *common.BankAccount {
+	return &a.BankAccount
+}
+
 func (a *Account) TotalBalance() (int64, error) {
 	return a.balance, nil
 }
