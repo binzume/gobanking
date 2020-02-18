@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/binzume/gobanking/common"
+	"github.com/binzume/gobanking/utils"
 )
 
 type Account struct {
@@ -52,8 +53,6 @@ type authStatusResponse struct {
 	Token      string `json:"token"`
 }
 
-var _ common.Account = &Account{}
-
 const BankCode = "0397"
 const BankName = "新生銀行"
 const baseUrl = "https://bk.shinseibank.com/SFC/apps/services/"
@@ -61,7 +60,7 @@ const baseUrl = "https://bk.shinseibank.com/SFC/apps/services/"
 type P map[string]string
 
 func Login(id, password string, options map[string]interface{}) (*Account, error) {
-	client, err := common.NewHttpClient()
+	client, err := utils.NewHttpClient()
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +215,7 @@ func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64
 		return nil, fmt.Errorf("not found")
 	}
 
-	common.DebugLog("target: ", target)
+	utils.DebugLog("target: ", target)
 
 	req := map[string]interface{}{
 		"requestParam": map[string]interface{}{
@@ -255,7 +254,7 @@ func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64
 	preconfirm := preconfirmRes.Preconfirm.Response
 	amount, _ = strconv.ParseInt(preconfirm["amount"], 10, 0)
 	fee, _ := strconv.ParseInt(preconfirm["fee"], 10, 0)
-	return common.TransferStateMap{
+	return utils.TransferStateMap{
 		"target":     target,
 		"request":    req["requestParam"],
 		"preconfirm": preconfirm,
@@ -271,7 +270,7 @@ func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string,
 		return "", fmt.Errorf("empty secure grid")
 	}
 
-	trmap := tr.(common.TransferStateMap)
+	trmap := tr.(utils.TransferStateMap)
 	target := trmap["target"].(map[string]string)
 	preconfirm := trmap["preconfirm"].(map[string]string)
 	transfarReq := trmap["request"].(map[string]interface{})
@@ -466,8 +465,8 @@ func (a *Account) query(adapter, procedure string, req interface{}, res interfac
 		"parameters": parametersStr,
 	}
 	r, err := a.post("api/SFC/desktopbrowser/query", params)
-	common.DebugLog("params: ", params)
-	common.DebugLog("response:", string(r))
+	utils.DebugLog("params: ", params)
+	utils.DebugLog("response:", string(r))
 	if err != nil {
 		return err
 	}

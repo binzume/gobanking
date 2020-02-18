@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/binzume/gobanking/common"
+	"github.com/binzume/gobanking/utils"
 
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/transform"
@@ -33,15 +34,13 @@ type Account struct {
 }
 type TransferState map[string]interface{}
 
-var _ common.Account = &Account{}
-
 const BankCode = "0001"
 const BankName = "みずほ銀行"
 const MizuhoUrl = "https://web1.ib.mizuhobank.co.jp/servlet/"
 const DummyFingerPrint = "version%3D3%2E2%2E0%2E0%5F3%26pm%5Ffpua%3Dmozilla"
 
 func Login(id, password string, options map[string]interface{}) (*Account, error) {
-	client, err := common.NewHttpClient()
+	client, err := utils.NewHttpClient()
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +168,7 @@ func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64
 		return nil, fmt.Errorf("error pass2 get digits.: %v", pp)
 	}
 
-	tr := common.TransferStateMap{
+	tr := utils.TransferStateMap{
 		"pass2_digits": pp,
 		"next":         "TRNTRN0508001B",
 	}
@@ -183,7 +182,7 @@ func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64
 }
 
 func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string, error) {
-	tr1, ok := tr.(common.TransferStateMap)
+	tr1, ok := tr.(utils.TransferStateMap)
 	if !ok {
 		return "", errors.New("invalid paramter type: tr")
 	}
@@ -237,7 +236,7 @@ func (a *Account) sendAikotoba(html string, qa map[string]string) (string, error
 		}
 		return a.execute("LOGWRD0010001B", map[string]string{
 			"chkConfItemChk": "on",
-			"txbTestWord":    common.ToSJIS(ans),
+			"txbTestWord":    utils.ToSJIS(ans),
 		}, true)
 	}
 	return html, nil
@@ -377,5 +376,5 @@ func getFormValue(html, name string) string {
 }
 
 func getMatched(htmlStr, reStr, def string) string {
-	return common.GetMatched(htmlStr, reStr, def)
+	return utils.GetMatched(htmlStr, reStr, def)
 }

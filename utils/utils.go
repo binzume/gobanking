@@ -1,4 +1,4 @@
-package common
+package utils
 
 import (
 	"bytes"
@@ -45,12 +45,12 @@ func ToSJIS(s string) string {
 
 func NewHttpClient() (*http.Client, error) {
 	jar, err := cookiejar.New(nil)
-	return &http.Client{Jar: jar, Transport: &AgentSetter{}}, err
+	return &http.Client{Jar: jar, Transport: &agentSetter{}}, err
 }
 
-type AgentSetter struct{}
+type agentSetter struct{}
 
-func (t *AgentSetter) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *agentSetter) RoundTrip(req *http.Request) (*http.Response, error) {
 	req.Header.Set("User-Agent", UserAgent)
 	if Logger != nil {
 		Logger.Println("REQUEST", req.Method, req.URL)

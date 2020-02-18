@@ -12,6 +12,7 @@ import (
 	"golang.org/x/text/transform"
 
 	"github.com/binzume/gobanking/common"
+	"github.com/binzume/gobanking/utils"
 )
 
 type Account struct {
@@ -27,10 +28,8 @@ const baseUrl = "https://www.netbk.co.jp/wpl/NBGate/"
 
 type P map[string]string
 
-var _ common.Account = &Account{}
-
 func Login(id, password string, options map[string]interface{}) (*Account, error) {
-	client, err := common.NewHttpClient()
+	client, err := utils.NewHttpClient()
 	if err != nil {
 		return nil, err
 	}
@@ -154,5 +153,5 @@ func getMatchedInt(htmlStr, reStr string) (int64, error) {
 }
 
 func getMatched(htmlStr, reStr, def string) string {
-	return common.GetMatched(htmlStr, reStr, def)
+	return utils.GetMatched(htmlStr, reStr, def)
 }

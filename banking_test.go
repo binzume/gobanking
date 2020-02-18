@@ -10,6 +10,7 @@ import (
 	"github.com/binzume/gobanking/sbi"
 	"github.com/binzume/gobanking/shinsei"
 	"github.com/binzume/gobanking/stub"
+	"github.com/binzume/gobanking/utils"
 )
 
 func TestAccount(t *testing.T) {
@@ -20,7 +21,7 @@ func TestAccount(t *testing.T) {
 	var _ common.Account = &shinsei.Account{}
 	var _ common.Account = &stub.Account{}
 
-	common.Debug = true
+	utils.Debug = true
 
 	acc, err := LoginWithJsonFile("examples/accounts/stub.json")
 	if err != nil {

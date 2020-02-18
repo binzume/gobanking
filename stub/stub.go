@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/binzume/gobanking/common"
+	"github.com/binzume/gobanking/utils"
 )
 
 type Account struct {
@@ -14,8 +15,6 @@ type Account struct {
 
 const BankCode = "9999"
 const BankName = "テスト銀行"
-
-var _ common.Account = &Account{}
 
 func Login(id, password string, options map[string]interface{}) (*Account, error) {
 	a := &Account{
@@ -67,7 +66,7 @@ func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64
 	if amount == 0 || targetName == "" {
 		return nil, errors.New("transfer error")
 	}
-	return common.TransferStateMap{"fee": a.getInt("transfer_fee", 100), "amount": amount, "to": targetName}, nil
+	return utils.TransferStateMap{"fee": a.getInt("transfer_fee", 100), "amount": amount, "to": targetName}, nil
 }
 
 func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string, error) {

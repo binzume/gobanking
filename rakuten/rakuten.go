@@ -16,6 +16,7 @@ import (
 	"golang.org/x/text/transform"
 
 	"github.com/binzume/gobanking/common"
+	"github.com/binzume/gobanking/utils"
 )
 
 type Account struct {
@@ -29,14 +30,12 @@ type Account struct {
 	lastLogin time.Time
 }
 
-var _ common.Account = &Account{}
-
 const BankCode = "0036"
 const BankName = "楽天銀行"
 const baseurl = "https://fes.rakuten-bank.co.jp/MS/main/"
 
 func Login(id, password string, options map[string]interface{}) (*Account, error) {
-	client, err := common.NewHttpClient()
+	client, err := utils.NewHttpClient()
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +83,7 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 			"INPUT_FORM:_link_hidden_": "",
 			"INPUT_FORM:_idJsp157":     "INPUT_FORM:_idJsp157",
 			"INPUT_FORM:TOKEN":         getMatched(res, `name="INPUT_FORM:TOKEN"\s+value="([^"]+)"`, ""),
-			"INPUT_FORM:SECRET_WORD":   common.ToSJIS(ans),
+			"INPUT_FORM:SECRET_WORD":   utils.ToSJIS(ans),
 		}
 		_, err := a.post("commonservice/Security/LoginAuthentication/SecretWordAuthentication/SecretWordAuthentication", params)
 		if err != nil {
@@ -284,7 +283,7 @@ func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64
 		"FORM:_link_hidden_":         "",
 		btn:                          btn, // _idJsp230 181
 		"FORM:COMMENT":               "",
-		"FORM:DEBIT_OWNER_NAME_KANA": common.ToSJIS(getMatched(res, `name="FORM:DEBIT_OWNER_NAME_KANA" [^>]*value="([^"]+)"`, "")),
+		"FORM:DEBIT_OWNER_NAME_KANA": utils.ToSJIS(getMatched(res, `name="FORM:DEBIT_OWNER_NAME_KANA" [^>]*value="([^"]+)"`, "")),
 		"FORM:AMOUNT":                fmt.Sprint(amount),
 	}
 	res, err = a.post(action, params)
@@ -303,12 +302,12 @@ func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64
 	feeint, _ := strconv.Atoi(strings.Replace(fee, ",", "", -1))
 	btn = getMatched(res, `name="(SECURITY_BOARD:_idJsp\d+)" [^>]*value="振込実行"`, "")
 	action = getMatched(res, `name="SECURITY_BOARD" [^>]*action="/MS/main/fcs/rb/fes/jsp/([^"]+)\.jsp"`, "")
-	return common.TransferStateMap{"token": token, "button": btn, "action": action,
+	return utils.TransferStateMap{"token": token, "button": btn, "action": action,
 		"fee_msg": fee, "fee": int(feeint), "date": date, "to": to, "amount": amount}, err
 }
 
 func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string, error) {
-	tr1, ok := tr.(common.TransferStateMap)
+	tr1, ok := tr.(utils.TransferStateMap)
 	if !ok {
 		return "", errors.New("invalid paramter type: tr")
 	}
@@ -380,5 +379,5 @@ func getMatchedInt(htmlStr, reStr string) (int64, error) {
 }
 
 func getMatched(htmlStr, reStr, def string) string {
-	return common.GetMatched(htmlStr, reStr, def)
+	return utils.GetMatched(htmlStr, reStr, def)
 }
