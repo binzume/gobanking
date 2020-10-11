@@ -59,7 +59,7 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 
 	params := map[string]string{
 		"LOGIN_SUBMIT":               "1",
-		"LOGIN:_link_hidden_":        "LOGIN:_idJsp41",
+		"LOGIN:_link_hidden_":        "LOGIN:_idJsp43",
 		"LOGIN:LOGIN_PASSWORD_CHECK": "TOOLTIP_CHECK",
 		"LOGIN:USER_ID":              id,
 		"LOGIN:LOGIN_PASSWORD":       password,
