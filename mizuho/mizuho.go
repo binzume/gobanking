@@ -87,6 +87,16 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 	if err != nil {
 		return err
 	}
+
+	if q := getMatched(html, `<form action="" name="(LOGCNF_02400B)"`, ""); q != "" {
+		html, err = a.execute("LOGCNF0240001B", map[string]string{
+			"_FORMID": "LOGCNF_02400B",
+		}, true)
+		if err != nil {
+			return err
+		}
+	}
+
 	return a.parseTopPage(html)
 }
 
