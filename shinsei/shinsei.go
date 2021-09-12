@@ -55,7 +55,7 @@ type authStatusResponse struct {
 
 const BankCode = "0397"
 const BankName = "新生銀行"
-const baseUrl = "https://bk.shinseibank.com/SFC/apps/services/"
+const baseUrl = "https://bk.web.shinseibank.com/SFC/apps/services/"
 
 type P map[string]string
 
@@ -94,11 +94,13 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 	}
 
 	r, err := a.post("login_auth_request_url", P{
-		"fldUserID":  id,
-		"password":   password,
-		"langCode":   "JAP",
-		"mode":       "1",
-		"postubFlag": "0",
+		"fldUserID":     id,
+		"password":      password,
+		"langCode":      "JAP",
+		"mode":          "1",
+		"postubFlag":    "0",
+		"jsc":           "_",
+		"userAgentInfo": utils.UserAgent,
 	})
 	if err != nil {
 		return err
@@ -283,12 +285,12 @@ func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string,
 			"beneficiaryName":        target["beneficiaryName"],
 			"beneficiaryAccountNo":   target["beneficiaryAccountNo"],
 			"beneficiaryAccountType": target["beneficiaryAccountType"],
-			"bank":            target["bankNameKana"],
-			"bankNameKanji":   target["bankNameKanji"],
-			"bankCode":        target["bankCode"],
-			"branch":          target["branchNameKana"],
-			"branchNameKanji": target["branchNameKanji"],
-			"branchCode":      target["branchCode"],
+			"bank":                   target["bankNameKana"],
+			"bankNameKanji":          target["bankNameKanji"],
+			"bankCode":               target["bankCode"],
+			"branch":                 target["branchNameKana"],
+			"branchNameKanji":        target["branchNameKanji"],
+			"branchCode":             target["branchCode"],
 
 			"amount":                    preconfirm["amount"],
 			"totalAmount":               preconfirm["totalAmount"],
@@ -299,12 +301,12 @@ func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string,
 			"namebackFlag":              transfarReq["namebackFlag"],
 			"moretimeFlag":              transfarReq["moretimeFlag"],
 			"authenticationStatus":      "G",
-			"userAgentInfo":             "test",
+			"userAgentInfo":             utils.UserAgent,
 			"registeredBeneficiaryFlag": "Y",
-			"pin": pass2,
-			"gridChallengeValue1": a.getgrid(gridChallenge["challenge1"]),
-			"gridChallengeValue2": a.getgrid(gridChallenge["challenge2"]),
-			"gridChallengeValue3": a.getgrid(gridChallenge["challenge3"]),
+			"pin":                       pass2,
+			"gridChallengeValue1":       a.getgrid(gridChallenge["challenge1"]),
+			"gridChallengeValue2":       a.getgrid(gridChallenge["challenge2"]),
+			"gridChallengeValue3":       a.getgrid(gridChallenge["challenge3"]),
 		},
 	}
 	var confirmRes struct {
@@ -446,6 +448,9 @@ func (a *Account) init() error {
 		return err
 	}
 	a.instanceID = res.Challenges.Realm["WL-Instance-Id"]
+	if a.instanceID == "" {
+		return fmt.Errorf("WL-Instance-Id not found")
+	}
 	return nil
 }
 
@@ -483,6 +488,7 @@ func (a *Account) query(adapter, procedure string, req interface{}, res interfac
 		AuthInfo     map[string]interface{} `json:"WL-Authentication-Success,omitempty"`
 	}
 	err = json.Unmarshal(r, &result)
+
 	if err != nil {
 		return err
 	}
