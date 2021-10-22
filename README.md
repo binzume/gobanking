@@ -1,10 +1,11 @@
-# Internet Banking fo Golang
+# Internet Banking library for Go
 
-[![Build Status](https://travis-ci.org/binzume/gobanking.svg)](https://travis-ci.org/binzume/gobanking)
+[![Build Status](https://travis-ci.com/binzume/gobanking.svg?branch=master)](https://travis-ci.com/binzume/gobanking)
+[![Go Reference](https://pkg.go.dev/badge/github.com/binzume/gobanking.svg)](https://pkg.go.dev/github.com/binzume/gobanking)
 [![codecov](https://codecov.io/gh/binzume/gobanking/branch/master/graph/badge.svg)](https://codecov.io/gh/binzume/gobanking)
-[![GoDoc](https://godoc.org/github.com/binzume/gobanking?status.svg)](https://godoc.org/github.com/binzume/gobanking)
+[![license](https://img.shields.io/badge/license-MIT-4183c4.svg)](https://github.com/binzume/gobanking/blob/master/LICENSE)
 
-Golangで銀行のサイトをスクレイピングして操作するためのライブラリです．
+GoでAPIの無い銀行のサイトをスクレイピングして操作するためのライブラリです．
 昔Rubyで書いたものをGolangに移植したもの．
 
 - Pure Golang
@@ -31,7 +32,11 @@ Golangで銀行のサイトをスクレイピングして操作するための�
 
 ## Usage
 
+Command line tools in the examples:
+
 T.B.D.
+
+Go API:
 
 とりあえず，共通の操作は [common.Account](common/common.go) のインターフェイスを見れば分かるかもしれません．
 
@@ -73,7 +78,7 @@ func main() {
 
 ### 残高取得
 
-```golang
+```go
 	total, err := acc.TotalBalance()
 ```
 
@@ -81,7 +86,7 @@ func main() {
 
 直近の数件を返すものと，期間指定で取得する関数があります．取得可能な件数や期間は銀行によって異なります．
 
-```golang
+```go
 	recent, err := acc.Recent()
 	history, err := History(time.Now().Add(-time.Hour*24*30), time.Now())
 ```
@@ -97,7 +102,7 @@ func main() {
 `NewTransferToRegisteredAccount()` で登録済みの口座への振込情報を作成し，`CommitTransfer()` で確定．
 
 
-```golang
+```go
 	tr, err := acc.NewTransferToRegisteredAccount("binzume", 5000000000000000)
 	if err != nil {
 		log.Fatal(err)
