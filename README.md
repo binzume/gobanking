@@ -1,6 +1,6 @@
 # Internet Banking library for Go
 
-[![Build Status](https://travis-ci.com/binzume/gobanking.svg?branch=master)](https://travis-ci.com/binzume/gobanking)
+[![Build Status](https://github.com/binzume/gobanking/actions/workflows/test.yaml/badge.svg)](https://github.com/binzume/gobanking/actions)
 [![Go Reference](https://pkg.go.dev/badge/github.com/binzume/gobanking.svg)](https://pkg.go.dev/github.com/binzume/gobanking)
 [![codecov](https://codecov.io/gh/binzume/gobanking/branch/master/graph/badge.svg)](https://codecov.io/gh/binzume/gobanking)
 [![license](https://img.shields.io/badge/license-MIT-4183c4.svg)](https://github.com/binzume/gobanking/blob/master/LICENSE)
