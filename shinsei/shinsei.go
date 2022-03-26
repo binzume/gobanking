@@ -21,7 +21,7 @@ type Account struct {
 
 	client *http.Client
 
-	instanceID    string
+	auth          string
 	csrfToken     string
 	mainAccountNo string
 
@@ -49,13 +49,21 @@ type activityResponse struct {
 }
 
 type authStatusResponse struct {
-	AuthStatus string `json:"authStatus"`
-	Token      string `json:"token"`
+	Res struct {
+		AuthStatus string      `json:"authStatus"`
+		Token      string      `json:"token"`
+		Error      interface{} `json:"errorMessage"`
+	} `json:"responseJSON"`
+}
+
+type securityConnectResponse struct {
+	UserID     string                 `json:"userId"`
+	Attributes map[string]interface{} `json:"attributes"`
 }
 
 const BankCode = "0397"
 const BankName = "新生銀行"
-const baseUrl = "https://bk.web.shinseibank.com/SFC/apps/services/"
+const baseUrl = "https://bk.web.shinseibank.com/SFC/app/"
 
 type P map[string]string
 
@@ -79,21 +87,7 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 		}
 	}
 
-	err := a.init()
-	if err != nil {
-		return err
-	}
-
-	var securityConnectRes authStatusResponse
-	err = a.query("IFCM_CommonAdapter", "securityConnect", nil, &securityConnectRes)
-	if err != nil {
-		return err
-	}
-	if securityConnectRes.AuthStatus != "required" {
-		return fmt.Errorf("invalid authStatus: %v", securityConnectRes.AuthStatus)
-	}
-
-	r, err := a.post("login_auth_request_url", P{
+	r, err := a.post("ShinseiAuthenticatorRealm/login_auth_request_url", P{
 		"fldUserID":     id,
 		"password":      password,
 		"langCode":      "JAP",
@@ -105,16 +99,32 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 	if err != nil {
 		return err
 	}
-
 	var res authStatusResponse
 	err = json.Unmarshal(r, &res)
 	if err != nil {
 		return err
 	}
-	if res.AuthStatus != "success" {
-		return fmt.Errorf("invalid authStatus: %v", res.AuthStatus)
+	if res.Res.AuthStatus != "success" {
+		return fmt.Errorf("invalid authStatus: %v", res.Res.AuthStatus)
 	}
-	a.csrfToken = res.Token
+	a.csrfToken = res.Res.Token
+
+	var securityConnectRes securityConnectResponse
+	err = a.rawQuery("IFCM_CommonAdapter", "securityConnect", nil, &securityConnectRes)
+	if err != nil {
+		return err
+	}
+	if securityConnectRes.UserID == "" {
+		return fmt.Errorf("invalid response: %v", securityConnectRes)
+	}
+	if lastLoginTime, ok := securityConnectRes.Attributes["lastLoginTime"].(string); ok {
+		a.lastLogin, _ = time.Parse("2006/01/02 15:04:05", lastLoginTime)
+	}
+
+	err = a.query("IFCM_CommonAdapter", "validateToken", nil, nil)
+	if err != nil {
+		return err
+	}
 
 	a.BranchCode = id[0:3]
 	a.AccountNum = id[3:]
@@ -122,11 +132,7 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 }
 
 func (a *Account) Logout() error {
-	_, err := a.post("api/SFC/desktopbrowser/logout", P{
-		"realm":         "ShinseiAuthenticatorRealm",
-		"isAjaxRequest": "1",
-		"x":             "0",
-	})
+	_, err := a.post("ShinseiAuthenticatorRealm/logout_request_url", P{})
 	return err
 }
 
@@ -408,16 +414,14 @@ func (a *Account) post(path string, params P) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("WL-Instance-Id", a.instanceID)
-	req.Header.Set("X-CSRF-Token", a.csrfToken)
-	req.Header.Set("x-wl-app-version", "1.0")
-	req.Header.Set("x-wl-clientlog-appname", "SFC")
-	req.Header.Set("x-wl-clientlog-appversion", "1.0")
-	req.Header.Set("x-wl-clientlog-env", "desktopbrowser")
-	req.Header.Set("x-wl-clientlog-deviceId", "UNKNOWN")
-	req.Header.Set("x-wl-clientlog-model", "UNKNOWN")
-	req.Header.Set("x-wl-clientlog-osversion", "UNKNOWN")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	req.Header.Set("Referer", baseUrl)
+	if a.auth != "" {
+		req.Header.Set("authorization", a.auth)
+	}
+	if a.csrfToken != "" {
+		req.Header.Set("x-csrf-token", a.csrfToken)
+	}
 
 	res, err := a.client.Do(req)
 	if err != nil {
@@ -425,37 +429,45 @@ func (a *Account) post(path string, params P) ([]byte, error) {
 	}
 	defer res.Body.Close()
 
+	if res.Header.Get("authorization") != "" {
+		a.auth = res.Header.Get("authorization")
+	}
+
 	b, err := ioutil.ReadAll(res.Body)
 	return bytes.TrimSuffix(bytes.TrimPrefix(b, []byte("/*-secure-")), []byte("*/")), err
 }
 
-func (a *Account) init() error {
-	r, err := a.post("api/SFC/desktopbrowser/init", P{
-		"isAjaxRequest": "1",
-		"x":             "0",
-	})
+func (a *Account) postJson(path string, reqJson string) ([]byte, error) {
+
+	req, err := http.NewRequest("POST", baseUrl+path, strings.NewReader(reqJson))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	var res struct {
-		Challenges struct {
-			Realm map[string]string `json:"wl_antiXSRFRealm"`
-		} `json:"challenges"`
+	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+	req.Header.Set("Referer", baseUrl)
+	if a.auth != "" {
+		req.Header.Set("authorization", a.auth)
+	}
+	if a.csrfToken != "" {
+		req.Header.Set("x-csrf-token", a.csrfToken)
 	}
 
-	err = json.Unmarshal(r, &res)
+	res, err := a.client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	a.instanceID = res.Challenges.Realm["WL-Instance-Id"]
-	if a.instanceID == "" {
-		return fmt.Errorf("WL-Instance-Id not found")
+	defer res.Body.Close()
+
+	if res.Header.Get("authorization") != "" {
+		a.auth = res.Header.Get("authorization")
 	}
-	return nil
+
+	b, err := ioutil.ReadAll(res.Body)
+	return bytes.TrimSuffix(bytes.TrimPrefix(b, []byte("/*-secure-")), []byte("*/")), err
 }
 
-func (a *Account) query(adapter, procedure string, req interface{}, res interface{}) error {
-	parametersStr := "[]"
+func (a *Account) rawQuery(adapter, procedure string, req interface{}, res interface{}) error {
+	parametersStr := ""
 	if req != nil {
 		reqJSON, err := json.Marshal(req)
 		if err != nil {
@@ -464,51 +476,35 @@ func (a *Account) query(adapter, procedure string, req interface{}, res interfac
 		parametersJSON, _ := json.Marshal([]string{string(reqJSON)})
 		parametersStr = string(parametersJSON)
 	}
-	params := P{
-		"adapter":    adapter,
-		"procedure":  procedure,
-		"parameters": parametersStr,
-	}
-	r, err := a.post("api/SFC/desktopbrowser/query", params)
-	utils.DebugLog("params: ", params)
+
+	r, err := a.postJson(adapter+"/"+procedure, parametersStr)
+	utils.DebugLog("params: ", parametersStr)
 	utils.DebugLog("response:", string(r))
 	if err != nil {
 		return err
 	}
 
-	// get auth status.
-	if _, ok := res.(*authStatusResponse); ok {
-		return json.Unmarshal(r, res)
-	}
+	return json.Unmarshal(r, res)
+}
 
+func (a *Account) query(adapter, procedure string, req interface{}, res interface{}) error {
 	var result struct {
-		IsSuccessful bool                   `json:"isSuccessful"`
-		Response     json.RawMessage        `json:"responseParam"`
-		Headers      map[string]interface{} `json:"header"`
-		AuthInfo     map[string]interface{} `json:"WL-Authentication-Success,omitempty"`
+		Response *json.RawMessage       `json:"responseParam"`
+		Headers  map[string]interface{} `json:"header"`
+		AuthInfo map[string]interface{} `json:"WL-Authentication-Success,omitempty"`
 	}
-	err = json.Unmarshal(r, &result)
-
+	err := a.rawQuery(adapter, procedure, req, &result)
 	if err != nil {
 		return err
-	}
-	if !result.IsSuccessful {
-		return fmt.Errorf("response.IsSuccessful=false")
-	}
-	if result.AuthInfo != nil {
-		if realm, ok := result.AuthInfo["ShinseiAuthenticatorRealm"].(map[string]interface{}); ok {
-			if attributes, ok := realm["attributes"].(map[string]interface{}); ok {
-				if lastLoginTime, ok := attributes["lastLoginTime"].(string); ok {
-					a.lastLogin, _ = time.Parse("2006/01/02 15:04:05", lastLoginTime)
-				}
-			}
-		}
 	}
 	if token, ok := result.Headers["newToken"].(string); ok {
 		a.csrfToken = token
 	}
 	if res != nil {
-		err = json.Unmarshal(result.Response, res)
+		if result.Response == nil {
+			return fmt.Errorf("Unexpected response %v", result)
+		}
+		err = json.Unmarshal(*result.Response, res)
 		if err != nil {
 			return err
 		}
