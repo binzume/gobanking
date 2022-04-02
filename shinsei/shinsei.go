@@ -87,7 +87,7 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 		}
 	}
 
-	r, err := a.post("ShinseiAuthenticatorRealm/login_auth_request_url", P{
+	r, err := a.postForm("ShinseiAuthenticatorRealm/login_auth_request_url", P{
 		"fldUserID":     id,
 		"password":      password,
 		"langCode":      "JAP",
@@ -132,7 +132,7 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 }
 
 func (a *Account) Logout() error {
-	_, err := a.post("ShinseiAuthenticatorRealm/logout_request_url", P{})
+	_, err := a.postForm("ShinseiAuthenticatorRealm/logout_request_url", P{})
 	return err
 }
 
@@ -164,13 +164,11 @@ func (a *Account) History(from, to time.Time) ([]*common.Transaction, error) {
 		toStr = fmt.Sprintf("%04d%02d%02d", to.Year(), to.Month(), to.Day())
 		typ = "1"
 	}
-	req := map[string]interface{}{
-		"requestParam": map[string]string{
-			"accountNo": a.mainAccountNo,
-			"type":      typ,
-			"fromDate":  fromStr,
-			"toDate":    toStr,
-		},
+	req := P{
+		"accountNo": a.mainAccountNo,
+		"type":      typ,
+		"fromDate":  fromStr,
+		"toDate":    toStr,
 	}
 
 	var activityRes struct {
@@ -226,18 +224,16 @@ func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64
 	utils.DebugLog("target: ", target)
 
 	req := map[string]interface{}{
-		"requestParam": map[string]interface{}{
-			"senderAccountNo":        a.mainAccountNo,
-			"senderName":             a.customerNameKana,
-			"branch":                 target["branchNameKana"],
-			"bank":                   target["bankNameKana"],
-			"beneficiaryName":        target["beneficiaryName"],
-			"beneficiaryAccountNo":   target["beneficiaryAccountNo"],
-			"beneficiaryAccountType": target["beneficiaryAccountType"],
-			"amount":                 amount,
-			"namebackFlag":           "Y",
-			"moretimeFlag":           "1",
-		},
+		"senderAccountNo":        a.mainAccountNo,
+		"senderName":             a.customerNameKana,
+		"branch":                 target["branchNameKana"],
+		"bank":                   target["bankNameKana"],
+		"beneficiaryName":        target["beneficiaryName"],
+		"beneficiaryAccountNo":   target["beneficiaryAccountNo"],
+		"beneficiaryAccountType": target["beneficiaryAccountType"],
+		"amount":                 amount,
+		"namebackFlag":           "Y",
+		"moretimeFlag":           "1",
 	}
 	var preconfirmRes struct {
 		Preconfirm struct {
@@ -264,7 +260,7 @@ func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64
 	fee, _ := strconv.ParseInt(preconfirm["fee"], 10, 0)
 	return utils.TransferStateMap{
 		"target":     target,
-		"request":    req["requestParam"],
+		"request":    req,
 		"preconfirm": preconfirm,
 		"grid":       gridRes.Result.Response,
 		"amount":     amount,
@@ -284,36 +280,34 @@ func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string,
 	transfarReq := trmap["request"].(map[string]interface{})
 	gridChallenge := trmap["grid"].(map[string]string)
 	req := map[string]interface{}{
-		"requestParam": map[string]interface{}{
-			"beneficiaryAdd":         1,
-			"senderName":             transfarReq["senderName"],
-			"senderAccountNo":        transfarReq["senderAccountNo"],
-			"beneficiaryName":        target["beneficiaryName"],
-			"beneficiaryAccountNo":   target["beneficiaryAccountNo"],
-			"beneficiaryAccountType": target["beneficiaryAccountType"],
-			"bank":                   target["bankNameKana"],
-			"bankNameKanji":          target["bankNameKanji"],
-			"bankCode":               target["bankCode"],
-			"branch":                 target["branchNameKana"],
-			"branchNameKanji":        target["branchNameKanji"],
-			"branchCode":             target["branchCode"],
+		"beneficiaryAdd":         1,
+		"senderName":             transfarReq["senderName"],
+		"senderAccountNo":        transfarReq["senderAccountNo"],
+		"beneficiaryName":        target["beneficiaryName"],
+		"beneficiaryAccountNo":   target["beneficiaryAccountNo"],
+		"beneficiaryAccountType": target["beneficiaryAccountType"],
+		"bank":                   target["bankNameKana"],
+		"bankNameKanji":          target["bankNameKanji"],
+		"bankCode":               target["bankCode"],
+		"branch":                 target["branchNameKana"],
+		"branchNameKanji":        target["branchNameKanji"],
+		"branchCode":             target["branchCode"],
 
-			"amount":                    preconfirm["amount"],
-			"totalAmount":               preconfirm["totalAmount"],
-			"fee":                       preconfirm["fee"],
-			"valueDate":                 preconfirm["transactionDate"], // TODO
-			"deleteBeneficiaryName":     "",
-			"sessionRegistTime":         time.Now().UnixNano() / int64(time.Millisecond), // TODO
-			"namebackFlag":              transfarReq["namebackFlag"],
-			"moretimeFlag":              transfarReq["moretimeFlag"],
-			"authenticationStatus":      "G",
-			"userAgentInfo":             utils.UserAgent,
-			"registeredBeneficiaryFlag": "Y",
-			"pin":                       pass2,
-			"gridChallengeValue1":       a.getgrid(gridChallenge["challenge1"]),
-			"gridChallengeValue2":       a.getgrid(gridChallenge["challenge2"]),
-			"gridChallengeValue3":       a.getgrid(gridChallenge["challenge3"]),
-		},
+		"amount":                    preconfirm["amount"],
+		"totalAmount":               preconfirm["totalAmount"],
+		"fee":                       preconfirm["fee"],
+		"valueDate":                 preconfirm["transactionDate"], // TODO
+		"deleteBeneficiaryName":     "",
+		"sessionRegistTime":         time.Now().UnixNano() / int64(time.Millisecond), // TODO
+		"namebackFlag":              transfarReq["namebackFlag"],
+		"moretimeFlag":              transfarReq["moretimeFlag"],
+		"authenticationStatus":      "G",
+		"userAgentInfo":             utils.UserAgent,
+		"registeredBeneficiaryFlag": "Y",
+		"pin":                       pass2,
+		"gridChallengeValue1":       a.getgrid(gridChallenge["challenge1"]),
+		"gridChallengeValue2":       a.getgrid(gridChallenge["challenge2"]),
+		"gridChallengeValue3":       a.getgrid(gridChallenge["challenge3"]),
 	}
 	var confirmRes struct {
 		Response struct {
@@ -326,6 +320,111 @@ func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string,
 	}
 
 	return confirmRes.Response.Param["txnReferenceNo"], nil
+}
+
+func extractResponseParam(res map[string]interface{}) (interface{}, error) {
+	if res == nil || res["responseParam"] == nil {
+		return nil, fmt.Errorf("No response: %v", res)
+	}
+	if e, ok := res["errorInfo"].(map[string]interface{}); ok && len(e) > 0 {
+		if e["statusMessage"] != "SUCCESS" {
+			return res["responseParam"], fmt.Errorf("Error: %v", e)
+		}
+	}
+	return res["responseParam"], nil
+}
+
+func findAccount(accounts []map[string]interface{}, cur string) map[string]interface{} {
+	for _, a := range accounts {
+		if a["currency"].(string) == cur {
+			return a
+		}
+	}
+	return nil
+}
+
+func (a *Account) NewFxTransfer(fromCur, toCur string, amount float32, pin string) (common.TransferState, error) {
+
+	err := a.query("IFCM_CommonAdapter", "validateToken", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var accountListRes struct {
+		Overview struct {
+			Param struct {
+				SavingDetails []map[string]interface{} `json:"savingsDetails"`
+			} `json:"responseParam"`
+		} `json:"accountOverviewAPIParm"`
+	}
+
+	err = a.query("IFCM_CommonAdapter", "getAccountInformationListDisplay", P{"getPatternFlg": ""}, &accountListRes)
+	if err != nil {
+		return nil, err
+	}
+	var fromAccount = findAccount(accountListRes.Overview.Param.SavingDetails, fromCur)
+	if fromAccount == nil {
+		return nil, fmt.Errorf("No account for %v", fromCur)
+	}
+	var toAccount = findAccount(accountListRes.Overview.Param.SavingDetails, toCur)
+	if toAccount == nil {
+		return nil, fmt.Errorf("No account for %v", toAccount)
+	}
+
+	err = a.query("IFCM_CommonAdapter", "checkAuthenticationStatus", P{"pin": pin}, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	params := map[string]interface{}{
+		"amount":            amount,
+		"creditAccountNo":   toAccount["accountNo"],
+		"creditCcyCode":     toAccount["currency"],
+		"creditProductCode": toAccount["productCode"],
+		"debitAccountNo":    fromAccount["accountNo"],
+		"debitCcyCode":      fromAccount["currency"],
+		"debitProductCode":  fromAccount["productCode"],
+	}
+
+	tr := utils.TransferStateMap{
+		"params": params,
+		"from":   fromAccount,
+		"to":     toAccount,
+	}
+	return tr, a.UpdateFxTransfer(tr)
+}
+
+func (a *Account) UpdateFxTransfer(tr common.TransferState) error {
+	trmap := tr.(utils.TransferStateMap)
+
+	var confirmRes map[string]map[string]interface{}
+	err := a.query("IFFD_FxAdapter", "confirmPreRegistrationForeignCurrencyDeposits", trmap["params"], &confirmRes)
+	if err != nil {
+		return err
+	}
+
+	res, err := extractResponseParam(confirmRes["fxBuySellPreconfirmAPIParam"])
+	if err != nil {
+		return err
+	}
+
+	if r, ok := res.(map[string]interface{}); ok {
+		trmap["result"] = r
+		trmap["exchangeRate"] = r["exchangeRate"]
+		trmap["buySpread"] = r["buySpread"]
+		trmap["convertedAmount"] = r["convertedAmount"]
+		return nil
+	}
+	return fmt.Errorf("Unexpected response %#v", confirmRes)
+}
+
+func (a *Account) CommitFxTransfer(tr common.TransferState) (string, error) {
+	trmap := tr.(utils.TransferStateMap)
+	params := trmap["params"].(map[string]interface{})
+	params["exchangeRate"] = trmap["exchangeRate"]
+
+	err := a.query("IFFD_FxAdapter", "registerForeignCurrencyDeposits", params, nil)
+	return "", err
 }
 
 func (a *Account) GetAccountsBalanceAndActivity() error {
@@ -404,66 +503,46 @@ func (a *Account) getgrid(pos string) string {
 	return string(a.secureGrid[int(pos[1]-'0')][int(pos[0]-'A')])
 }
 
-func (a *Account) post(path string, params P) ([]byte, error) {
+func (a *Account) post(path, reqBody, contentType string) ([]byte, error) {
+	req, err := http.NewRequest("POST", baseUrl+path, strings.NewReader(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Referer", baseUrl)
+	if a.auth != "" {
+		req.Header.Set("authorization", a.auth)
+	}
+	if a.csrfToken != "" {
+		req.Header.Set("x-csrf-token", a.csrfToken)
+	}
+
+	res, err := a.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if res.Header.Get("authorization") != "" {
+		a.auth = res.Header.Get("authorization")
+	}
+
+	b, err := ioutil.ReadAll(res.Body)
+	utils.DebugLog("params: ", reqBody)
+	utils.DebugLog("response:", string(b))
+	return bytes.TrimSuffix(bytes.TrimPrefix(b, []byte("/*-secure-")), []byte("*/")), err
+}
+
+func (a *Account) postForm(path string, params P) ([]byte, error) {
 	values := url.Values{}
 	for k, v := range params {
 		values.Set(k, v)
 	}
-
-	req, err := http.NewRequest("POST", baseUrl+path, strings.NewReader(values.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-	req.Header.Set("Referer", baseUrl)
-	if a.auth != "" {
-		req.Header.Set("authorization", a.auth)
-	}
-	if a.csrfToken != "" {
-		req.Header.Set("x-csrf-token", a.csrfToken)
-	}
-
-	res, err := a.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-
-	if res.Header.Get("authorization") != "" {
-		a.auth = res.Header.Get("authorization")
-	}
-
-	b, err := ioutil.ReadAll(res.Body)
-	return bytes.TrimSuffix(bytes.TrimPrefix(b, []byte("/*-secure-")), []byte("*/")), err
+	return a.post(path, values.Encode(), "application/x-www-form-urlencoded; charset=UTF-8")
 }
 
 func (a *Account) postJson(path string, reqJson string) ([]byte, error) {
-
-	req, err := http.NewRequest("POST", baseUrl+path, strings.NewReader(reqJson))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
-	req.Header.Set("Referer", baseUrl)
-	if a.auth != "" {
-		req.Header.Set("authorization", a.auth)
-	}
-	if a.csrfToken != "" {
-		req.Header.Set("x-csrf-token", a.csrfToken)
-	}
-
-	res, err := a.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-
-	if res.Header.Get("authorization") != "" {
-		a.auth = res.Header.Get("authorization")
-	}
-
-	b, err := ioutil.ReadAll(res.Body)
-	return bytes.TrimSuffix(bytes.TrimPrefix(b, []byte("/*-secure-")), []byte("*/")), err
+	return a.post(path, reqJson, "application/json; charset=UTF-8")
 }
 
 func (a *Account) rawQuery(adapter, procedure string, req interface{}, res interface{}) error {
@@ -473,17 +552,13 @@ func (a *Account) rawQuery(adapter, procedure string, req interface{}, res inter
 		if err != nil {
 			return err
 		}
-		parametersJSON, _ := json.Marshal([]string{string(reqJSON)})
-		parametersStr = string(parametersJSON)
+		parametersStr = string(reqJSON)
 	}
 
 	r, err := a.postJson(adapter+"/"+procedure, parametersStr)
-	utils.DebugLog("params: ", parametersStr)
-	utils.DebugLog("response:", string(r))
 	if err != nil {
 		return err
 	}
-
 	return json.Unmarshal(r, res)
 }
 
@@ -493,7 +568,7 @@ func (a *Account) query(adapter, procedure string, req interface{}, res interfac
 		Headers  map[string]interface{} `json:"header"`
 		AuthInfo map[string]interface{} `json:"WL-Authentication-Success,omitempty"`
 	}
-	err := a.rawQuery(adapter, procedure, req, &result)
+	err := a.rawQuery(adapter, procedure, map[string]interface{}{"requestParam": req}, &result)
 	if err != nil {
 		return err
 	}
