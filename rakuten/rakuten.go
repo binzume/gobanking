@@ -3,6 +3,7 @@ package rakuten
 import (
 	"errors"
 	"fmt"
+	"html"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -22,8 +23,8 @@ import (
 type Account struct {
 	common.BankAccount
 
-	client   *http.Client
-	sequence int
+	client    *http.Client
+	viewState string
 
 	balance   int64
 	userName  string
@@ -32,7 +33,8 @@ type Account struct {
 
 const BankCode = "0036"
 const BankName = "楽天銀行"
-const baseurl = "https://fes.rakuten-bank.co.jp/MS/main/"
+const baseurlMS = "https://fes.rakuten-bank.co.jp/MS/main/"
+const baseurl = "https://fes.rakuten-bank.co.jp/XMS/"
 
 func Login(id, password string, options map[string]interface{}) (*Account, error) {
 	client, err := utils.NewHttpClient()
@@ -45,26 +47,27 @@ func Login(id, password string, options map[string]interface{}) (*Account, error
 }
 
 func (a *Account) Login(id, password string, options map[string]interface{}) error {
+
 	qa := map[string]string{}
 	for k, v := range options {
 		qa[k] = v.(string)
 	}
-	_, err := a.get("RbS?CurrentPageID=START&COMMAND=LOGIN")
+	_, err := a.getMS("RbS?CurrentPageID=START&COMMAND=LOGIN")
 	if err != nil {
 		return err
 	}
-	if a.sequence != 1 {
-		return errors.New("invalid response")
+	if a.viewState == "" {
+		return errors.New("invalid response (viewState)")
 	}
 
 	params := map[string]string{
 		"LOGIN_SUBMIT":               "1",
-		"LOGIN:_link_hidden_":        "LOGIN:_idJsp43",
+		"LOGIN:_idcl":                "LOGIN:j_id_1a",
 		"LOGIN:LOGIN_PASSWORD_CHECK": "TOOLTIP_CHECK",
 		"LOGIN:USER_ID":              id,
 		"LOGIN:LOGIN_PASSWORD":       password,
 	}
-	res, err := a.post("mainservice/Security/LoginAuthentication/Login/Login", params)
+	res, err := a.post("security/fcs/rb/fes/views/mainservice/Security/LoginAuthentication/Login/Login", params)
 	if err != nil {
 		return err
 	}
@@ -77,6 +80,7 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 				ans = v
 			}
 		}
+
 		log.Println("q:", qq, ans != "")
 		params := map[string]string{
 			"INPUT_FORM_SUBMIT":        "1",
@@ -91,29 +95,33 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 		}
 	}
 
-	res, err = a.get("gns?COMMAND=BALANCE_INQUIRY_START&CurrentPageID=HEADER_FOOTER_LINK")
+	res, err = a.get("inquiry/gns?COMMAND=BALANCE_INQUIRY_START&CurrentPageID=HEADER_FOOTER_LINK")
 	if err != nil {
 		return err
 	}
-	if a.sequence < 2 {
+	if a.viewState == "" {
 		return errors.New("login error")
 	}
 
+	a.parseTop(html.UnescapeString(res))
+
+	return err
+}
+
+func (a *Account) parseTop(res string) {
 	a.balance, _ = getMatchedInt(res, `(?s)総額（評価額）.*?>\s*([0-9,]+)\s*<`)
 	// a.balance, _ = getMatchedInt(res, `(?s)（支払可能残高）.*?>\s*([0-9,]+)\s*<`)
-	lastLoginStr := getMatched(res, `>\s+前回ログイン日時\s+([^<]+?)\s+<`, "")
+	lastLoginStr := getMatched(res, `(?s)<span class="login-date02">\s*([^<]+?)\s*<`, "")
 	if t, err := time.Parse("2006/01/02 15:04:05", lastLoginStr); err == nil {
 		a.lastLogin = t
 	}
 
 	a.BankCode = BankCode
 	a.BankName = BankName
-	a.OwnerName = getMatched(res, `>\s+([^<]+?)\s+様\s*<`, "")
-	a.BranchCode = getMatched(res, `>\s+支店番号\s+([^<]+?)\s*<`, "")
-	a.AccountNum = getMatched(res, `>\s+口座番号\s+([^<]+?)\s*<`, "")
-	a.BranchName = getMatched(res, `(?s)>\s+([^<]+支店)\s*</FONT>\s*</TD>\s*<TD>\s*<IMG[^>]*>`, "")
-
-	return err
+	a.OwnerName = getMatched(res, `(?s)<span class="smediumbold marginright4">\s*([^<]+?)\s*<`, "")
+	a.BranchCode = getMatched(res, `(?s)<span class="branch-number">.*?>.*?>(\d+)`, "")
+	a.AccountNum = getMatched(res, `(?s)<span class="account-number">.*?>.*?>(\d+)`, "")
+	a.BranchName = getMatched(res, `(?s)<span class="branch-name">([^<]+支店)`, "")
 }
 
 func (a *Account) Logout() error {
@@ -134,7 +142,7 @@ func (a *Account) LastLogin() (time.Time, error) {
 }
 
 func (a *Account) Recent() ([]*common.Transaction, error) {
-	res, err := a.get("gns?COMMAND=CREDIT_DEBIT_INQUIRY_START&CurrentPageID=HEADER_FOOTER_LINK")
+	res, err := a.get("inquiry/gns?COMMAND=CREDIT_DEBIT_INQUIRY_START&CurrentPageID=HEADER_FOOTER_LINK")
 	re1 := regexp.MustCompile(`(?s)<tr class="td\d\dline">(.*?)<\/tr>`)
 	re2 := regexp.MustCompile(`(?s)<td[^>]*>\s*<[^>]+>\s*(.*?)<[^>]+>\s*<\/td>`)
 	re3 := regexp.MustCompile(`<[^>]+>`)
@@ -144,10 +152,10 @@ func (a *Account) Recent() ([]*common.Transaction, error) {
 		cell := re2.FindAllStringSubmatch(match[1], -1)
 		if len(cell) > 3 {
 			var tr common.Transaction
-			if t, err := time.Parse("2006/01/02", cell[0][1]); err == nil {
+			if t, err := time.Parse("2006/01/02", strings.TrimSpace(cell[0][1])); err == nil {
 				tr.Date = t
 			}
-			tr.Description = cell[1][1]
+			tr.Description = html.UnescapeString(cell[1][1])
 			cell[2][1] = strings.TrimSpace(re3.ReplaceAllString(cell[2][1], ""))
 			tr.Amount, _ = strconv.ParseInt(strings.Replace(cell[2][1], ",", "", -1), 10, 32)
 			tr.Balance, _ = strconv.ParseInt(strings.Replace(cell[3][1], ",", "", -1), 10, 32)
@@ -268,7 +276,7 @@ func (a *Account) NewTransferToRegisteredAccount(targetName string, amount int64
 		"SELECT_REGISTER_ACCOUNT_SUBMIT":                        "1",
 		"SELECT_REGISTER_ACCOUNT:_link_hidden_":                 "",
 		"SELECT_REGISTER_ACCOUNT:_idJsp431:" + n + ":_idJsp446": "SELECT_REGISTER_ACCOUNT:_idJsp431:" + n + ":_idJsp446",
-		"KANA_INDEX_KEY":                                        "",
+		"KANA_INDEX_KEY": "",
 	}
 	res, err := a.post("mainservice/Transfer/TransferMenu/TransferSelect/TransferSelect", params)
 	if err != nil {
@@ -324,6 +332,16 @@ func (a *Account) CommitTransfer(tr common.TransferState, pass2 string) (string,
 	return recptNo, err
 }
 
+func (a *Account) getMS(path string) (string, error) {
+	req, err := http.NewRequest("GET", baseurlMS+path, nil)
+	if err != nil {
+		return "", err
+	}
+
+	// log.Println("GET", path)
+	return a.request(req)
+}
+
 func (a *Account) get(path string) (string, error) {
 	req, err := http.NewRequest("GET", baseurl+path, nil)
 	if err != nil {
@@ -331,25 +349,24 @@ func (a *Account) get(path string) (string, error) {
 	}
 
 	// log.Println("GET", path)
-	a.sequence += 2
 	return a.request(req)
 }
 
-func (a *Account) post(cmd string, params map[string]string) (string, error) {
+func (a *Account) post(path string, params map[string]string) (string, error) {
 	values := url.Values{}
-	values.Set("jsf_sequence", fmt.Sprint(a.sequence))
+
+	values.Set("javax.faces.ViewState", a.viewState)
 	for k, v := range params {
 		values.Set(k, v)
 	}
 
-	req, err := http.NewRequest("POST", baseurl+"fcs/rb/fes/jsp/"+cmd+".jsp", strings.NewReader(values.Encode()))
+	req, err := http.NewRequest("POST", baseurl+path+".xhtml", strings.NewReader(values.Encode()))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	// log.Println("POST", cmd, values.Encode())
-	a.sequence++
 	return a.request(req)
 }
 
@@ -365,9 +382,11 @@ func (a *Account) request(req *http.Request) (string, error) {
 		return "", err
 	}
 	doc := string(b)
-	if seq := getMatched(doc, `name="jsf_sequence" [^>]*value=["'](\d+)["']`, ""); seq != "" {
-		a.sequence, _ = strconv.Atoi(seq)
+
+	if state := getMatched(doc, `name="javax.faces.ViewState" [^>]*value=["']([^"]+)["']`, ""); state != "" {
+		a.viewState = state
 	}
+
 	if msg := getMatched(doc, `class="errortxt">(.+?)</`, ""); msg != "" {
 		return doc, fmt.Errorf("ERROR: %s", msg)
 	}
