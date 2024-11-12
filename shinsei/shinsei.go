@@ -63,7 +63,8 @@ type securityConnectResponse struct {
 
 const BankCode = "0397"
 const BankName = "新生銀行"
-const baseUrl = "https://bk.web.shinseibank.com/SFC/app/"
+
+const baseUrl = "https://bk.web.sbishinseibank.co.jp/SFC/app/"
 
 type P map[string]string
 
@@ -128,6 +129,10 @@ func (a *Account) Login(id, password string, options map[string]interface{}) err
 
 	a.BranchCode = id[0:3]
 	a.AccountNum = id[3:]
+	return a.Refresh()
+}
+
+func (a *Account) Refresh() error {
 	return a.GetAccountsBalanceAndActivity()
 }
 
@@ -142,6 +147,14 @@ func (a *Account) AccountInfo() *common.BankAccount {
 
 func (a *Account) TotalBalance() (int64, error) {
 	return a.balance + a.fundBalance, nil
+}
+
+func (a *Account) MainBalance() int64 {
+	return a.balance
+}
+
+func (a *Account) FundBalance() int64 {
+	return a.fundBalance
 }
 
 func (a *Account) LastLogin() (time.Time, error) {
